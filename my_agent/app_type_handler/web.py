@@ -78,9 +78,14 @@ async def _execute_web_test_command(
     except asyncio.TimeoutError:
         if process:
             await finalize_subprocess(process, force_kill=True)
-        return f"Command timed out after {timeout} seconds."
+        # 必须带 `Exit Code:` 前缀：守卫（stage_policy._tool_result_failed）与 TDD 的
+        # _extract_exit_code 都靠它判成败。原先这里只返回一句 "Command timed out after ..."，
+        # 于是超时被当成「没失败」—— 守卫不解锁已写文件，而超时恰恰是最需要改一改再试的那类失败。
+        # 124 是 timeout(1) 的约定退出码，cli.py / android.py 的超时分支用的也是它。
+        return f"Exit Code: 124\nSTDERR:\nCommand timed out after {timeout} seconds.\n"
     except Exception as exc:
-        return f"Execution failed: {str(exc)}"
+        # 同上：执行失败也要带标记，否则同样会被判成「没失败」。
+        return f"Exit Code: 1\nSTDERR:\nExecution failed: {str(exc)}\n"
 
 def _extract_exit_code(command_output: str) -> int | None:
     for line in (command_output or "").splitlines():
