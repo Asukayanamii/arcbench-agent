@@ -39,6 +39,41 @@ async def run_npm_install(target_dir: str, log_cb: Callable[..., Awaitable[None]
         await _emit_log(log_cb, "System", f"NPM install error: {str(exc)}")
 
 
+def _local_node_binary(working_dir: str, name: str) -> str | None:
+    """在 `node_modules/.bin` 里找本地可执行文件；找不到返回 None。
+
+    存在的理由是一次真实的挂起：生成的 `package.json` 声明了 vitest，但 `node_modules`
+    里没有 —— `try_install_dependencies` 只在阶段早期跑过一次（实测 backend 3 秒、
+    frontend 10 秒就「成功」了，正常装不完），之后 agent 为了修 runner 往 package.json
+    加的依赖**永远不会被安装**。而 `npx` 找不到本地包时会转去下载，并在有 TTY 时停下来
+    打印 `Ok to proceed? (y)` —— 永远等不到输入，于是每次测试调用都挂满超时。
+    放宽超时（60 → 180 秒）只是让它每次挂得更久（issue #24）。
+
+    直接用本地路径而不是给 npx 加 `--no-install`：前者的行为跨 npm 版本一致
+    （`--no-install` 在 npm 7+ 已被 `--no` 取代），而且能在毫秒级失败、顺便点名缺哪个包。
+    """
+
+    bin_dir = os.path.join(working_dir, "node_modules", ".bin")
+    for candidate in (name, f"{name}.cmd", f"{name}.CMD", f"{name}.exe", f"{name}.bat"):
+        path = os.path.join(bin_dir, candidate)
+        if os.path.exists(path):
+            return f'"{path}"'
+    return None
+
+
+def _missing_runner_message(working_dir: str, binary: str) -> str:
+    """依赖没装时的失败回执：秒级失败、点名缺什么、告诉对方怎么修。"""
+
+    return (
+        "Exit Code: 1\n"
+        "STDERR:\n"
+        f"`{binary}` is not installed in `{working_dir}/node_modules/.bin`, although `package.json` "
+        f"declares it. Not invoking it through `npx`: `npx` would try to download it and block on an "
+        "interactive prompt instead of failing, which burns the whole test budget on timeouts.\n"
+        f"Run `npm install` in that directory (or add the missing dependency), then rerun the tests.\n"
+    )
+
+
 def _default_test_command_timeout() -> float:
     """测试命令的默认超时秒数，可用 `ARC_TEST_COMMAND_TIMEOUT` 覆盖。
 
@@ -94,6 +129,7 @@ async def _execute_web_test_command(
     if timeout is None:
         timeout = _default_test_command_timeout()
     process = None
+    timeout_capture: tuple[bytes, bytes] = (b"", b"")
     try:
         process = await asyncio.create_subprocess_shell(
             command,
@@ -111,7 +147,21 @@ async def _execute_web_test_command(
                 **(extra_env or {}),
             },
         )
-        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        # 用 shield 保护这次读取：wait_for 超时只取消外层等待，不会把读取本身取消掉，
+        # 于是杀掉子进程之后还能把「它生前打印的内容」收回来。直接
+        # `await wait_for(process.communicate(), ...)` 会把现场跟超时一起丢掉 ——
+        # 排查 issue #24 时就是因为这个，日志里连 npx 的 "Ok to proceed?" 都看不到。
+        reader = asyncio.ensure_future(process.communicate())
+        try:
+            stdout, stderr = await asyncio.wait_for(asyncio.shield(reader), timeout=timeout)
+        except asyncio.TimeoutError:
+            if process:
+                await finalize_subprocess(process, force_kill=True)
+            try:
+                timeout_capture = await asyncio.wait_for(reader, timeout=3.0)
+            except Exception:
+                timeout_capture = (b"", b"")
+            raise
         output = stdout.decode("utf-8", errors="replace")
         error = stderr.decode("utf-8", errors="replace")
 
@@ -125,12 +175,17 @@ async def _execute_web_test_command(
         return result
     except asyncio.TimeoutError:
         if process:
+            # 上面的 shield 分支已经 kill 过一次；再调一次是幂等的。
             await finalize_subprocess(process, force_kill=True)
+        captured = b"\n".join(part for part in timeout_capture if part).decode("utf-8", errors="replace").strip()
+        detail = f"Command timed out after {timeout} seconds.\n"
+        if captured:
+            detail += captured + "\n[ARC] The lines above were captured from the process before it was killed.\n"
+        else:
+            detail += "[ARC] The process produced no output before it was killed.\n"
         # 必须带 `Exit Code:` 前缀：守卫（stage_policy._tool_result_failed）与 TDD 的
-        # _extract_exit_code 都靠它判成败。原先这里只返回一句 "Command timed out after ..."，
-        # 于是超时被当成「没失败」—— 守卫不解锁已写文件，而超时恰恰是最需要改一改再试的那类失败。
-        # 124 是 timeout(1) 的约定退出码，cli.py / android.py 的超时分支用的也是它。
-        return f"Exit Code: 124\nSTDERR:\nCommand timed out after {timeout} seconds.\n"
+        # _extract_exit_code 都靠它判成败。124 是 timeout(1) 的约定退出码。
+        return f"Exit Code: 124\nSTDERR:\n{detail}"
     except Exception as exc:
         # 同上：执行失败也要带标记，否则同样会被判成「没失败」。
         return f"Exit Code: 1\nSTDERR:\nExecution failed: {str(exc)}\n"
@@ -984,10 +1039,15 @@ class WebAppType(AppTypeHandler):
             exit_codes: list[int] = []
 
             if execution.get("backend_targets"):
-                backend_command = "npx vitest run " + " ".join(execution["backend_targets"])
-                backend_result = await _execute_web_test_command(
-                    backend_command,
-                    cwd=execution["backend_working_directory"],
+                backend_dir = execution["backend_working_directory"]
+                backend_bin = _local_node_binary(backend_dir, "vitest")
+                backend_result = (
+                    _missing_runner_message(backend_dir, "vitest")
+                    if backend_bin is None
+                    else await _execute_web_test_command(
+                        f"{backend_bin} run " + " ".join(execution["backend_targets"]),
+                        cwd=backend_dir,
+                    )
                 )
                 sections.append(f"=== Backend Vitest Batch ===\n{backend_result}")
                 backend_exit_code = _extract_exit_code(backend_result)
@@ -996,10 +1056,15 @@ class WebAppType(AppTypeHandler):
                 exit_codes.append(backend_exit_code)
 
             if execution.get("frontend_targets"):
-                frontend_command = "npx vitest run " + " ".join(execution["frontend_targets"])
-                frontend_result = await _execute_web_test_command(
-                    frontend_command,
-                    cwd=execution["frontend_working_directory"],
+                frontend_dir = execution["frontend_working_directory"]
+                frontend_bin = _local_node_binary(frontend_dir, "vitest")
+                frontend_result = (
+                    _missing_runner_message(frontend_dir, "vitest")
+                    if frontend_bin is None
+                    else await _execute_web_test_command(
+                        f"{frontend_bin} run " + " ".join(execution["frontend_targets"]),
+                        cwd=frontend_dir,
+                    )
                 )
                 sections.append(f"=== Frontend Vitest Batch ===\n{frontend_result}")
                 frontend_exit_code = _extract_exit_code(frontend_result)
@@ -1072,15 +1137,20 @@ class WebAppType(AppTypeHandler):
                     f"STDERR:\n{backend_startup_detail or 'No startup detail recorded.'}\n",
                 )
 
-            playwright_command = "npx playwright test"
-            if execution.get("resolved_targets"):
-                playwright_command += " " + " ".join(execution["resolved_targets"])
-            playwright_result = await _execute_web_test_command(
-                playwright_command,
-                cwd=execution["working_directory"],
-                timeout=120.0,
-                extra_env=e2e_runtime_env,
-            )
+            e2e_dir = execution["working_directory"]
+            playwright_bin = _local_node_binary(e2e_dir, "playwright")
+            if playwright_bin is None:
+                playwright_result = _missing_runner_message(e2e_dir, "@playwright/test")
+            else:
+                playwright_command = playwright_bin + " test"
+                if execution.get("resolved_targets"):
+                    playwright_command += " " + " ".join(execution["resolved_targets"])
+                playwright_result = await _execute_web_test_command(
+                    playwright_command,
+                    cwd=e2e_dir,
+                    timeout=120.0,
+                    extra_env=e2e_runtime_env,
+                )
             playwright_exit_code = _extract_exit_code(playwright_result)
             if playwright_exit_code is None:
                 playwright_exit_code = 1

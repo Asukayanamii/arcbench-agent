@@ -727,6 +727,59 @@ def check_timeouts_are_configurable_and_distinguishable() -> None:
           test_results.parse_test_results("Exit Code: 0\n\n=== Backend Vitest Batch ===\nExit Code: 0\n")["exit_code"] == 0)
 
 
+def check_test_runners_fail_fast_instead_of_hanging() -> None:
+    """测试 runner 缺失时要**秒级失败**，超时也要**留住现场**（issue #24）。
+
+    第 4 轮本地判题把超时从 60 秒放宽到 180 秒后，Unit 层**依然**每次超时（两次相邻调用间隔
+    3 分 12 秒）。这否掉了「60 秒太紧」的归因 —— 不是慢，是挂起。根因是
+    `node_modules` 里**没有 vitest**（`package.json` 声明了），而 `npx` 找不到本地包时会
+    转去下载并在有 TTY 时停下来问 `Ok to proceed? (y)`，永远等不到输入。
+
+    放大它的两件事：`try_install_dependencies` 只在阶段早期跑过一次（backend 3 秒、
+    frontend 10 秒就「成功」，正常装不完），之后 agent 为修 runner 加的依赖永不安装；
+    而超时分支把子进程已经打印的内容整个丢掉，导致现场无法复盘。
+
+    这条检查三样都验：本地二进制解析、缺失信息的质量、以及超时是否留住输出。
+    """
+
+    print()
+    print("--- test runners fail fast instead of hanging ---")
+
+    import tempfile  # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory(prefix="arc-runner-probe-") as tmp:
+        check("a missing binary resolves to None",
+              web_handler._local_node_binary(tmp, "vitest") is None)
+
+        bin_dir = Path(tmp) / "node_modules" / ".bin"
+        bin_dir.mkdir(parents=True)
+        (bin_dir / "vitest").write_text("#!/bin/sh\n", encoding="utf-8")
+        resolved = web_handler._local_node_binary(tmp, "vitest")
+        check("an installed binary resolves to its local path",
+              resolved is not None and "node_modules" in resolved, f"got {resolved!r}")
+
+    message = web_handler._missing_runner_message("/workspace/frontend", "vitest")
+    check("the missing-runner reply fails instead of hanging",
+          message.startswith("Exit Code: 1"), message.splitlines()[0])
+    check("it names the missing binary", "vitest" in message)
+    check("it says how to fix it", "npm install" in message)
+    check("the guard reads it as a failure", stage_policy._tool_result_failed(message))
+
+    async def probe() -> str:
+        return await web_handler._execute_web_test_command(
+            f'"{sys.executable}" -c "import time; print(\'MARKER_BEFORE_HANG\', flush=True); time.sleep(5)"',
+            cwd=str(REPO),
+            timeout=0.5,
+        )
+
+    output = asyncio.run(probe())
+    check("a timeout still reports Exit Code: 124",
+          "Exit Code: 124" in output, output.splitlines()[0] if output else "")
+    check("a timeout keeps what the process had already printed",
+          "MARKER_BEFORE_HANG" in output,
+          "partial output was discarded - that is what made the npx hang undiagnosable")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -741,6 +794,7 @@ def main() -> int:
     check_clean_survives_readonly_git_objects()
     check_a_stage_can_stop_its_own_agent_session()
     check_timeouts_are_configurable_and_distinguishable()
+    check_test_runners_fail_fast_instead_of_hanging()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0
