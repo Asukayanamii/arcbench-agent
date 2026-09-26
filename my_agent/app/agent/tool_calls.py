@@ -11,6 +11,7 @@
 import asyncio
 import logging
 from pathlib import Path
+from typing import Annotated, get_args, get_origin, get_type_hints
 
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import ToolException
@@ -18,6 +19,7 @@ from langgraph.config import get_config
 from langgraph.errors import GraphBubbleUp
 from langgraph.graph import MessagesState
 from langgraph.types import interrupt
+from langgraph.types import Command
 
 from app.agent.messages import error_message, text_of
 from app.agent.runtime import current_workspace
@@ -84,17 +86,28 @@ async def run_tools(state: MessagesState):
 
     token = _workspace_token(config)
     try:
-        results = await run_calls(calls, config, approved)
+        results = await run_calls(calls, config, approved, state)
     finally:
         if token is not None:
             current_workspace.reset(token)
 
-    return {"messages": results}
+    update: dict = {"messages": []}
+    for result in results:
+        if isinstance(result, Command):
+            command_update = dict(result.update or {})
+            for key, value in command_update.items():
+                if key == "messages":
+                    update.setdefault("messages", []).extend(value or [])
+                else:
+                    update[key] = value
+        else:
+            update.setdefault("messages", []).append(result)
+    return update
 
 
 async def invoke_call(
-    call: dict, config: dict, approved: dict[str, bool]
-) -> ToolMessage:
+    call: dict, config: dict, approved: dict[str, bool], state: MessagesState
+) -> ToolMessage | Command:
     """
     跑一次调用，把"没做成"收成带 error 标记的回执。
 
@@ -110,10 +123,11 @@ async def invoke_call(
         return error_message(call["id"], f"未知工具：{call['name']}")
 
     try:
+        tool_args = _inject_tool_args(tool, call["args"], call["id"], state)
         output = await tool.ainvoke(
             {
                 "name": call["name"],
-                "args": call["args"],
+                "args": tool_args,
                 "id": call["id"],
                 "type": "tool_call",
             },
@@ -139,14 +153,14 @@ async def invoke_call(
     # tool_call_id 一起包进 ToolMessage——artifact 是工具留给界面的结构化数据
     # （`content_and_artifact`，目前只有 edit 的结构化差异用它），正文进提示词、artifact 不进。
     # 注意：只传参数 dict 调用的形态**会把 artifact 悄悄丢掉**（实测），所以这里必须给整条调用。
-    if isinstance(output, ToolMessage):
+    if isinstance(output, (ToolMessage, Command)):
         return output
     return ToolMessage(content=text_of(output), tool_call_id=call["id"])
 
 
 async def run_calls(
-    calls: list[dict], config: dict, approved: dict[str, bool]
-) -> list[ToolMessage]:
+    calls: list[dict], config: dict, approved: dict[str, bool], state: MessagesState
+) -> list[ToolMessage | Command]:
     """
     同一轮的多个调用并行执行。
 
@@ -159,11 +173,31 @@ async def run_calls(
 
     不用 TaskGroup：它会把异常包进异常组，LangGraph 就认不出那个中断了。
     """
+    tool_map = _tool_map(config)
+    stateful_calls = [
+        call for call in calls
+        if _returns_command(tool_map.get(call["name"]))
+    ]
+    if stateful_calls:
+        # State updates are ordered so add_todo allocates ids from the latest list.
+        current_state = dict(state)
+        results: list[ToolMessage | Command] = []
+        for call in calls:
+            result = await invoke_call(call, config, approved, current_state)
+            results.append(result)
+            if isinstance(result, Command):
+                for key, value in (result.update or {}).items():
+                    if key == "messages":
+                        current_state[key] = [*(current_state.get(key) or []), *(value or [])]
+                    else:
+                        current_state[key] = value
+        return results
+
     happened: list[BaseException] = []
 
     async def run(call: dict) -> ToolMessage:
         try:
-            return await invoke_call(call, config, approved)
+            return await invoke_call(call, config, approved, state)
         except BaseException as exc:
             # 记"实际发生"的先后，run_calls 结尾要用（为什么见那里）
             happened.append(exc)
@@ -183,7 +217,7 @@ async def run_calls(
         task.cancel()
     await asyncio.gather(*running, return_exceptions=True)
 
-    results: list[ToolMessage] = []
+    results: list[ToolMessage | Command] = []
     for task in tasks:
         if task.cancelled():
             continue
@@ -197,3 +231,35 @@ async def run_calls(
         # 用户对这张卡片的回答就会落到另一个调用手里（实测见 LESSONS）。
         raise happened[0]
     return results
+
+
+def _inject_tool_args(tool, args: dict, tool_call_id: str, state: MessagesState) -> dict:
+    """Inject hidden LangGraph arguments without rebuilding the tool schema."""
+
+    from langchain_core.tools import InjectedToolCallId
+    from langgraph.prebuilt import InjectedState
+
+    coroutine = getattr(tool, "coroutine", None)
+    hints = get_type_hints(coroutine, include_extras=True) if coroutine else {}
+    injected = dict(args)
+    for name, annotation in hints.items():
+        if get_origin(annotation) is not Annotated:
+            continue
+        metadata = get_args(annotation)[1:]
+        if any(meta is InjectedToolCallId for meta in metadata):
+            injected[name] = tool_call_id
+        elif any(meta is InjectedState or isinstance(meta, InjectedState) for meta in metadata):
+            injected[name] = state
+    return injected
+
+
+def _returns_command(tool) -> bool:
+    if tool is None:
+        return False
+    coroutine = getattr(tool, "coroutine", None)
+    if coroutine is None:
+        return False
+    try:
+        return get_type_hints(coroutine, include_extras=True).get("return") is Command
+    except (NameError, TypeError):
+        return False

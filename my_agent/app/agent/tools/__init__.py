@@ -17,9 +17,10 @@ from app.agent.tools.get_current_time import get_current_time
 from app.agent.tools.grep import grep
 from app.agent.tools.ls import ls
 from app.agent.tools.read import read
+from app.agent.tools.todo import TODO_TOOLS
 from app.agent.tools.write import write
 
-TOOLS = [read, write, edit, ls, find, grep, bash, get_current_time]
+TOOLS = [read, write, edit, ls, find, grep, bash, get_current_time, *TODO_TOOLS]
 
 APPROVAL_REQUIRED: set[str] = set()
 """
