@@ -39,6 +39,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
@@ -650,6 +651,82 @@ def check_a_stage_can_stop_its_own_agent_session() -> None:
           "the enforcing side must flip the flag, or the predicate never fires")
 
 
+def check_timeouts_are_configurable_and_distinguishable() -> None:
+    """测试命令的超时既要**可配**，又要**可区分**（issue #21）。
+
+    两件事都是实跑逼出来的。`run-logs/2026-09-26-hackathon--github-99d44e6` 里
+    `REQ-1-1-1` 的 Unit 5/5 与 Integration 5/5 被判「失败」，实际全是 60 秒超时：
+
+    * **不可配**：`timeout=60.0` 硬编码，本地 Windows 冷启动 node/vitest 稳定超过它。
+      agent 拿到的是一次「失败」，可超时值在它自己的配置里、不在 `/workspace`，
+      提示词却要求它就地修 harness —— 它没有任何杠杆，只能把整层预算耗在重试上。
+    * **不可区分**：`run_test_group` 把任何非零塌缩成 1，而外层信封的退出码是
+      `parse_test_results` 唯一会读的那个 → 「测试跑了且失败」和「测试没跑完」
+      在层判定里长得一模一样。
+
+    这条检查对两者都做行为验证，而不是扫源码：真的让它超时、真的比退出码。
+    """
+
+    print()
+    print("--- timeouts are configurable and distinguishable ---")
+
+    saved = os.environ.get("ARC_TEST_COMMAND_TIMEOUT")
+
+    try:
+        os.environ.pop("ARC_TEST_COMMAND_TIMEOUT", None)
+        check("default timeout stays 60.0 (platform behaviour unchanged)",
+              web_handler._default_test_command_timeout() == 60.0,
+              f"got {web_handler._default_test_command_timeout()}")
+
+        for raw, expected in (("90", 90.0), ("0.5", 0.5)):
+            os.environ["ARC_TEST_COMMAND_TIMEOUT"] = raw
+            check(f"ARC_TEST_COMMAND_TIMEOUT={raw} is honoured",
+                  web_handler._default_test_command_timeout() == expected,
+                  f"got {web_handler._default_test_command_timeout()}")
+
+        for raw in ("", "  ", "abc", "0", "-5"):
+            os.environ["ARC_TEST_COMMAND_TIMEOUT"] = raw
+            check(f"garbage {raw!r} falls back to 60.0",
+                  web_handler._default_test_command_timeout() == 60.0,
+                  f"got {web_handler._default_test_command_timeout()}")
+
+        # 端到端：不传 timeout 时走环境变量。这条同时证明「配置真的到达了执行点」，
+        # 而不只是「那个读 env 的函数返回了对的值」。
+        os.environ["ARC_TEST_COMMAND_TIMEOUT"] = "0.5"
+
+        async def probe() -> tuple[str, float]:
+            started = time.perf_counter()
+            out = await web_handler._execute_web_test_command(
+                f'"{sys.executable}" -c "import time; time.sleep(5)"',
+                cwd=str(REPO),
+            )
+            return out, time.perf_counter() - started
+
+        output, elapsed = asyncio.run(probe())
+        check("the env-var timeout reaches the real execution point",
+              "Exit Code: 124" in output and elapsed < 4.0,
+              f"elapsed={elapsed:.2f}s output={output[:80]!r}")
+    finally:
+        if saved is None:
+            os.environ.pop("ARC_TEST_COMMAND_TIMEOUT", None)
+        else:
+            os.environ["ARC_TEST_COMMAND_TIMEOUT"] = saved
+
+    merge = web_handler._batch_exit_code
+    check("all sub-batches passing -> 0", merge([0, 0]) == 0, f"got {merge([0, 0])}")
+    check("a plain failure stays 1", merge([1, 1]) == 1, f"got {merge([1, 1])}")
+    check("a timeout is NOT collapsed to 1", merge([124]) == 124, f"got {merge([124])}")
+    check("a timeout among failures still wins", merge([1, 124]) == 124, f"got {merge([1, 124])}")
+    check("no sub-batches -> 1", merge([]) == 1, f"got {merge([])}")
+
+    envelope = "Exit Code: 124\n\n=== Backend Vitest Batch ===\nExit Code: 124\nSTDERR:\nCommand timed out after 0.5 seconds.\n"
+    parsed = test_results.parse_test_results(envelope)["exit_code"]
+    check("the parser reads a timed-out envelope as 124, not 1",
+          parsed == 124, f"exit_code={parsed}")
+    check("the parser still reads a passing envelope as 0",
+          test_results.parse_test_results("Exit Code: 0\n\n=== Backend Vitest Batch ===\nExit Code: 0\n")["exit_code"] == 0)
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -663,6 +740,7 @@ def main() -> int:
     check_published_budget_matches_the_enforced_one()
     check_clean_survives_readonly_git_objects()
     check_a_stage_can_stop_its_own_agent_session()
+    check_timeouts_are_configurable_and_distinguishable()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0
