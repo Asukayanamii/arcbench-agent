@@ -1,0 +1,19 @@
+# The submission tree is packaged byte-for-byte (see _package.py) and runs on
+# Linux in the platform container. So the checkout has to be LF on every
+# platform: with only `core.autocrlf=true` and no .gitattributes, git rewrites
+# the working tree to CRLF on checkout, and the zip built from that tree no
+# longer matches the committed one - the artifact stops being reproducible.
+#
+# `eol=lf` here pins both the index and the checkout, so the packaged bytes no
+# longer depend on who cloned the repo or on their autocrlf setting.
+* text=auto eol=lf
+
+# Windows-only helpers, should any ever appear.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Never let git touch these.
+*.zip binary
+*.png binary
+*.jpg binary
+*.ico binary
