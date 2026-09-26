@@ -138,3 +138,31 @@ git diff upstream/main -- my_agent/app/     # 看我们对上游引擎改了什�
 ## 协作
 
 仓库为私有。协作者：`Asukayanamii`（owner）、`chenglei6-arch`（write）。
+
+### 分支约定
+
+`main` 只接受合并，不直接往上推。改动一律先落 `dev`，再开 PR 合进 `main`：
+
+```bash
+git checkout dev && git pull
+# ... 改代码、跑验证、打包 ...
+git add -A
+git commit -m "..."            # 提交信息只描述改动本身，不加任何工具/AI 署名
+git push origin dev
+gh pr create --base main --head dev --title "..." --body "..."
+gh pr merge <PR 号> --merge
+git checkout main && git pull  # 回到 main 跟上合并结果
+```
+
+提交信息里**不要**出现 `Co-authored-by:`、`Signed-off-by:`、`Generated with` 这类
+工具署名或生成声明，只写人类作者的改动内容。
+
+### 改动落在哪个分支
+
+| 内容 | 分支 |
+| --- | --- |
+| 交付包 `my_agent-arcbench-submission.zip` | 跟源码同一个 PR 一起提，或单独 `build:` 提交 |
+| `my_agent/` 提交树、ARC 层 | `dev` → PR → `main` |
+| 外层工具链、本地测试、README | 同上 |
+
+日志（`new log.txt`、`new ticket log.txt`）不入库，只在本地做诊断用。
