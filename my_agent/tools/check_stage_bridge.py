@@ -516,6 +516,55 @@ def check_published_budget_matches_the_enforced_one() -> None:
     )
 
 
+def check_clean_survives_readonly_git_objects() -> None:
+    """`--clean` 必须能在 Windows 上删掉带只读属性的 git 对象（issue #12）。
+
+    Windows 上 `.git/objects/*` 带 `FILE_ATTRIBUTE_READONLY`，默认的 `shutil.rmtree` 会抛
+    `PermissionError: [WinError 5]`，让 `--clean` 整个失败 —— 复跑同一个输出目录时必踩。
+    Linux 不受影响（unlink 的权限看父目录），所以「plain rmtree 会失败」这个前提只在
+    Windows 上成立，那一步在别人机器上跳过、但 `_rmtree_force` 那一步两边都验。
+    """
+
+    print()
+    print("--- --clean survives read-only git objects ---")
+
+    import shutil as _shutil  # noqa: PLC0415
+    import stat as _stat  # noqa: PLC0415
+    import sys as _sys  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    import arc_main  # noqa: PLC0415
+
+    def seed_readonly_tree(root: Path) -> None:
+        obj = root / ".git" / "objects" / "ab" / "cdef0123456789"
+        obj.parent.mkdir(parents=True, exist_ok=True)
+        obj.write_text("object\n", encoding="utf-8")
+        obj.chmod(_stat.S_IREAD)  # 模拟 git 对象的只读属性
+
+    plain_failed = False
+    with tempfile.TemporaryDirectory(prefix="arc-clean-probe-", ignore_cleanup_errors=True) as tmp:
+        seed_readonly_tree(Path(tmp))
+        try:
+            _shutil.rmtree(tmp)
+        except PermissionError:
+            plain_failed = True
+
+        if _sys.platform == "win32":
+            check("plain rmtree fails on a read-only git object (reproduces #12)",
+                  plain_failed, "it unexpectedly succeeded - probe is not reproducing")
+        else:
+            print("  SKIP  plain-rmtree reproduction (POSIX unlink ignores the read-only bit)")
+
+    with tempfile.TemporaryDirectory(prefix="arc-clean-probe-", ignore_cleanup_errors=True) as tmp:
+        seed_readonly_tree(Path(tmp))
+        try:
+            arc_main._rmtree_force(tmp)
+            removed, detail = not Path(tmp).exists(), ""
+        except Exception as exc:  # noqa: BLE001 - 异常本身就是结论
+            removed, detail = False, f"{type(exc).__name__}: {exc}"
+        check("_rmtree_force removes it", removed, detail)
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -527,6 +576,7 @@ def main() -> int:
     check_timeout_output_is_classified_as_failure()
     check_interface_contract_keeps_its_load_bearing_text()
     check_published_budget_matches_the_enforced_one()
+    check_clean_survives_readonly_git_objects()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0
