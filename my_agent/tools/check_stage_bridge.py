@@ -1065,6 +1065,46 @@ def check_todo_and_command_behaviour() -> None:
     check("run_tools preserves Command ToolMessage", isinstance(output.get("messages", [None])[0], ToolMessage))
 
 
+def check_a_passed_layer_is_not_rerun() -> None:
+    """层已通过后必须拒绝重跑，且**拒绝的判定要排在预算检查之前**（issue #33）。
+
+    实测（第 6 轮）：Unit 在 attempt 2 就已通过，却一路跑到 5/5；Integration 同样。
+    **12 次带真实退出码的调用里 8 次是「已通过之后的重跑」。** 代价直接计入评分
+    （score -> pass rate -> **lower cost** -> 提交时间），而且挤占真正需要修复时的预算
+    （第 6 轮 Unit 的 attempt 1 就是真实失败）。
+
+    这条检查盯的是**顺序**，那是承重的一点：守卫若排在预算检查之后，一个已经 5/5 通过的层
+    会先被判成「预算耗尽」并走 #13 的硬停路径 —— 回执语义完全不同（一个说「本层完成，
+    返回 IMPLEMENTED」，一个说「别再试了」）。执行器是闭包、要驱动它得搭整套 TDD 环境，
+    所以这里断言源码里的相对位置，而不是硬造一个假执行器去测。
+    """
+
+    print()
+    print("--- a passed layer is not rerun ---")
+
+    source = (REPO / "core" / "phases.py").read_text(encoding="utf-8", errors="replace")
+
+    guard = "prior_exit_code == 0:"
+    budget = "if used >= TDD_RUN_TESTS_BUDGET:"
+    increment = "usage_by_type[selected_type] = used + 1"
+    check("the repeat guard exists", guard in source, "guard removed - #33 would regress")
+    check("the budget check still exists", budget in source)
+
+    if guard in source and budget in source:
+        check("the guard runs BEFORE the budget check",
+              source.index(guard) < source.index(budget),
+              "a layer that passed at 5/5 would be misreported as budget-exhausted")
+    if guard in source and increment in source:
+        check("the guard runs BEFORE the usage counter increments",
+              source.index(guard) < source.index(increment),
+              "a refused repeat would still consume layer budget")
+
+    check("the refusal says the layer is complete",
+          "already passed for this node and is recorded as complete" in source)
+    check("the refusal reports Exit Code: 0, matching a completed layer",
+          "already passed for this node" in source and '"Exit Code: 0\\n"' in source)
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1082,6 +1122,7 @@ def main() -> int:
     check_test_runners_fail_fast_instead_of_hanging()
     check_install_is_verified_not_assumed()
     check_install_requests_dev_dependencies()
+    check_a_passed_layer_is_not_rerun()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()

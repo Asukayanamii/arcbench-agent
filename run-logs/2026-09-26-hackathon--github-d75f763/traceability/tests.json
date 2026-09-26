@@ -1,0 +1,114 @@
+{
+  "REQ-1-1-1-E2E-REGISTER-ACCOUNT-SCENARIOS": {
+    "test_id": "REQ-1-1-1-E2E-REGISTER-ACCOUNT-SCENARIOS",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "IF-REQ-1-1-1-DB-SEED-DATA",
+      "IF-REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "IF-REQ-1-1-1-API-AUTH-ROUTES",
+      "IF-REQ-1-1-1-API-AUTH-CLIENT",
+      "IF-REQ-1-1-1-UI-SESSION-PROVIDER",
+      "IF-REQ-1-1-1-UI-REGISTER-PAGE",
+      "IF-REQ-1-1-1-UI-SIGNIN-PAGE",
+      "IF-REQ-1-1-1-UI-HOME-PAGE"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/register-new-account.spec.js",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INTEGRATION-AUTH-API-CLIENT": {
+    "test_id": "REQ-1-1-1-INTEGRATION-AUTH-API-CLIENT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "IF-REQ-1-1-1-API-AUTH-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/authApi.test.ts",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INTEGRATION-AUTH-REGISTRATION": {
+    "test_id": "REQ-1-1-1-INTEGRATION-AUTH-REGISTRATION",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "IF-REQ-1-1-1-DB-SEED-DATA",
+      "IF-REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "IF-REQ-1-1-1-API-AUTH-ROUTES"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/auth/authRegistration.integration.test.js",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INTEGRATION-REGISTER-PAGE": {
+    "test_id": "REQ-1-1-1-INTEGRATION-REGISTER-PAGE",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "IF-REQ-1-1-1-UI-REGISTER-PAGE",
+      "IF-REQ-1-1-1-API-AUTH-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/RegisterPage.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INTEGRATION-REGISTRATION-FLOW": {
+    "test_id": "REQ-1-1-1-INTEGRATION-REGISTRATION-FLOW",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "IF-REQ-1-1-1-UI-REGISTER-PAGE",
+      "IF-REQ-1-1-1-UI-SESSION-PROVIDER",
+      "IF-REQ-1-1-1-UI-SIGNIN-PAGE",
+      "IF-REQ-1-1-1-UI-HOME-PAGE"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/RegistrationFlow.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INTEGRATION-SESSION-PROVIDER": {
+    "test_id": "REQ-1-1-1-INTEGRATION-SESSION-PROVIDER",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "IF-REQ-1-1-1-UI-SESSION-PROVIDER",
+      "IF-REQ-1-1-1-UI-HOME-PAGE"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/SessionProvider.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INTEGRATION-SESSION-STATE": {
+    "test_id": "REQ-1-1-1-INTEGRATION-SESSION-STATE",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "IF-REQ-1-1-1-UI-SESSION-PROVIDER",
+      "IF-REQ-1-1-1-UI-SIGNIN-PAGE",
+      "IF-REQ-1-1-1-UI-HOME-PAGE"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/AuthSessionState.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-UNIT-AUTH-SERVICE-VALIDATION": {
+    "test_id": "REQ-1-1-1-UNIT-AUTH-SERVICE-VALIDATION",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "IF-REQ-1-1-1-FUNC-AUTH-SERVICE"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/auth/authService.validation.unit.test.js",
+    "passed": false,
+    "first_line": "1",
+    "scenario_id": null
+  }
+}
