@@ -1,0 +1,310 @@
+{
+  "node_id": "REQ-1-1-1",
+  "phase_status": {
+    "design": "completed",
+    "test": "completed",
+    "implement": "failed"
+  },
+  "requirement_snapshot": {
+    "name": "Register a New GitHub Account",
+    "description": "The registration page is the form opened by the unique link named “Create an account” from the sign-in page. The form contains exactly one textbox labeled “Username”, one textbox labeled “Email”, one password input labeled “Password”, one password input labeled “Confirm password”, one initially unchecked checkbox named “Agree to the terms”, and one enabled button named “Create account”. The username and email identify the account, while passwords must not be echoed on the page. This product directly marks the email of a successfully registered account as verified and does not provide a subsequent email-verification page. The visitor enters a unique username, email, password, and matching confirmation, checks “Agree to the terms”, and activates “Create account”. The username must consist of 1 to 39 lowercase ASCII letters, digits, or single hyphens (`-`) and must not begin or end with a hyphen; after trimming leading and trailing whitespace, the email must contain exactly one `@`, be no longer than 254 characters, and have at least one dot and non-empty domain labels after the `@`; the password must contain 12 to 128 characters, include at least one uppercase letter, one lowercase letter, one digit, and one non-alphanumeric special character, and contain no whitespace characters. The system stores a sign-in-capable account together with its verified-email status and enters the sign-in page; if the username or email conflicts, any field is missing, the email format is invalid, the terms are not accepted, the password is noncompliant, or the confirmation does not match, the system retains the username and email input, displays an itemized message beside the corresponding field, and does not create an account. The corresponding visible field message contains “Username already exists”, “Username format is invalid”, “Email format is invalid”, “Password requirements are not satisfied”, or “Agree to terms is required”, as applicable. Visitors can use this capability on the account-access page. The system validates input rules, displays field errors, and prevents duplicate accounts; on success, it directly creates an available account. Submitting several invalid fields together must show the username, email, password, and missing-terms messages together, rather than revealing only one error per submission; the submit button remains actionable so these messages can be read. For example, a username beginning with a hyphen, email “not-an-email”, password “short”, confirmation “different”, and unchecked terms produce these field errors and preserve the attempted username. A duplicate username paired with a different unused email displays “Username already exists” and retains both attempted values. A successful registration accepts a unique username such as “pw-user-<unique suffix>”, its “@example.test” email, and password “Valid-password-123!”; the sign-in form is immediately available, accepts that email, and the resulting signed-in username remains visible after reload.\n\nScreenshot reference:\n![image](reference/github-sign-up.png)",
+    "visual_reference": [],
+    "children_ids": [],
+    "dependencies": []
+  },
+  "recent_failure_summary": "Unit: Runner: Vitest\nBatch Test Type: Unit\nWeb Port: 3411\nBase URL: http://localhost:3411\nRequested Test Files:\n- backend/tests/auth/auth_service_registration.test.js\nBackend Working Directory: D:\\project\\hks\\work\\judge-hackathon--github-99d44e6\\backend\nFrontend Working Directory: D:\\project\\hks\\work\\judge-hackathon--github-99d44e6\\frontend\nBackend Targets:\n- tests/auth/auth_service_registration.test.js\nExit Code: 1\n=== Backend Vitest Batch ===\nExit Code: 124\nSTDERR:\nCommand timed out after 60.0 seconds.\n\nIntegration: Runner: Vitest\nBatch Test Type: Integration\nWeb Port: 3411\nBase URL: http://localhost:3411\nRequested Test Files:\n- frontend/tests/auth/registration_page.test.tsx\nBackend Working Directory: D:\\project\\hks\\work\\judge-hackathon--github-99d44e6\\backend\nFrontend Working Directory: D:\\project\\hks\\work\\judge-hackathon--github-99d44e6\\frontend\nFrontend Targets:\n- tests/auth/registration_page.test.tsx\nExit Code: 1\n=== Frontend Vitest Batch ===\nExit Code: 124\nSTDERR:\nCommand timed out after 60.0 seconds.",
+  "interfaces": [
+    {
+      "interface_id": "REQ-1-1-1-UI-REGISTER-PAGE",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "RegisterPage",
+      "file_path": "frontend/src/pages/RegisterPage.tsx",
+      "first_line": "import { useNavigate } from 'react-router-dom';",
+      "responsibility": "The registration page opened by the unique 'Create an account' link from the sign-in page; renders exactly one Username textbox, one Email textbox, one Password input, one Confirm password input, one initially unchecked 'Agree to the terms' checkbox, and one enabled 'Create account' button, with an itemized message beside the corresponding field on failure.",
+      "specification": "Owns the accessible control set and error slots. Labels must be exactly 'Username', 'Email', 'Password', 'Confirm password', 'Agree to the terms', 'Create account'. Password inputs are type=password so passwords are never echoed. The submit button stays actionable while field errors are displayed. On success the component navigates to the sign-in page; the registration success state is carried by the shared session provider, not a local banner. Errors are read from useRegistrationForm and rendered per field. DESIGN scaffold contains the labelled controls; TDD wires submit feedback, navigation, and full error rendering.",
+      "inputs": "Route '/signup' (already mounted in the app route table); useRegistrationForm() state and errors.",
+      "outputs": "Labelled form markup; navigation to the sign-in route on success.",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "all five labelled controls plus the enabled Create account button are visible",
+        "password values are never echoed in the DOM or in field messages",
+        "checkbox starts unchecked",
+        "field messages render beside their own field and multiple messages can appear together",
+        "button remains clickable while errors are shown"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-UI-REGISTRATION-FORM-HOOK",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "useRegistrationForm",
+      "file_path": "frontend/src/features/auth/useRegistrationForm.ts",
+      "first_line": "import { useState } from 'react';",
+      "responsibility": "Owns registration form state and submission: collects username/email/password/confirmPassword/agreeToTerms, submits through the shared session provider, and exposes itemized field errors while retaining username and email after a rejected submission.",
+      "specification": "Returns { values, errors, submitting, registered, setField, submit }. submit() calls the shared session register(input) and, on failure, stores the complete fieldErrors map without clearing username/email; on success it clears errors and sets registered. Errors must never include submitted password values. TDD implements the full submit/retain semantics.",
+      "inputs": "Field change events from RegisterPage; RegisterInput shape.",
+      "outputs": "{ values, errors, submitting, registered, setField, submit: () => Promise<boolean> }",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "all violated fields produce messages in one submission (username, email, password, terms together)",
+        "attempted username and email are preserved after failure",
+        "multiple successive invalid submissions remain readable while the button stays enabled"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "AuthSessionProvider / useAuthSession",
+      "file_path": "frontend/src/features/auth/AuthSessionProvider.tsx",
+      "first_line": "import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';",
+      "responsibility": "Global authenticated-state contract for the whole app: single source of truth for the current user, session status (loading/unauthenticated/authenticated), and registration/sign-in/sign-out/refresh actions used by every auth surface.",
+      "specification": "Provides { user, status, register, signIn, signOut, refresh }. On mount it calls refresh() which restores state from the durable backend session so authenticated state survives reload. register() forwards to the auth API client and, on success, updates the shared user so header/navigation/auth-sensitive routes read the same value instead of page-local state. Must not expose fake user objects or hardcoded header text. TDD implements request wiring and error propagation; provider must be mounted around the app route tree.",
+      "inputs": "React children; RegisterInput / SignInInput values.",
+      "outputs": "AuthSessionValue context consumed via useAuthSession().",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "unauthenticated chrome before registration vs authenticated/current-user state after",
+        "registration success updates global session state, not only the page",
+        "refresh()/reload recovery keeps the signed-in identity visible",
+        "signOut clears the shared state"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-API-AUTH-CLIENT",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "auth_api (registerAccount/signIn/fetchSession/signOut)",
+      "file_path": "frontend/src/features/auth/auth_api.ts",
+      "first_line": "import apiClient from '../../api';",
+      "responsibility": "Frontend transport boundary for /api/auth/*: posts registration data, maps the backend 400/409 fieldErrors envelope into a typed result, and exposes sign-in, session-recovery and sign-out calls over the shared axios instance.",
+      "specification": "registerAccount(input) returns { ok: true, user } on 201 and { ok: false, fieldErrors } on a 400/409 validation response; other failures propagate so the axios interceptor handles them. signIn(input) returns AuthUser. fetchSession() returns AuthUser | null for durable session recovery. signOut() ends the session. Uses the existing shared axios client at frontend/src/api/index.ts (baseURL '/api', with global error interceptors) and relies on the backend-issued session cookie, so no token handling lives here.",
+      "inputs": "RegisterInput, SignInInput, no explicit credentials for session calls.",
+      "outputs": "RegisterResult, AuthUser, AuthUser | null, void.",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "fieldErrors envelope is surfaced without throwing for validation failures",
+        "successful registration/session calls return the public user shape",
+        "session endpoint drives post-reload recovery"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-API-AUTH-ROUTES",
+      "req_id": "REQ-1-1-1",
+      "type": "API",
+      "name": "authRoutes (POST /api/auth/register, POST /api/auth/login, GET /api/auth/session, POST /api/auth/logout)",
+      "file_path": "backend/src/routes/auth_routes.js",
+      "first_line": "const express = require('express');",
+      "responsibility": "HTTP surface for registration, sign-in, durable session recovery and sign-out; mounted at /api/auth and delegating all rules to the auth service.",
+      "specification": "POST /register body { username, email, password, confirmPassword, agreeToTerms } -> 201 { user: { id, username, email, emailVerified: true }, session: { token } } and sets the httpOnly session cookie; 400 { fieldErrors } carrying every violated field at once; 409 { fieldErrors } for username/email conflicts with messages 'Username already exists' / 'Email already exists'. GET /session -> 200 { user } or { user: null } from the durable cookie so the signed-in username survives reload. POST /login -> 200 { user, session } or 401 { message: 'Invalid username or password' }. POST /logout -> 200 { user: null } and clears the cookie. Handlers stay thin; no business rules or SQL in this file. TDD implements the handler bodies (currently 501 placeholders).",
+      "inputs": "Express req/res; JSON body; `sid` session cookie set by register/login.",
+      "outputs": "JSON envelopes described above; httpOnly session cookie.",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "supertest covers success, multi-field 400, and duplicate-credential 409 responses",
+        "session cookie is issued on registration and resolved by GET /session",
+        "no password or hash appears in any response body"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "req_id": "REQ-1-1-1",
+      "type": "FUNC",
+      "name": "authService (validateRegistrationInput, registerAccount, authenticateUser, session helpers, ensureSeedAccount)",
+      "file_path": "backend/src/services/auth_service.js",
+      "first_line": "'use strict';",
+      "responsibility": "Owns registration/credential business rules: username and email format rules, password composition rules, uniqueness enforcement, verified-email account creation, password hashing, credential verification, durable session records, and the idempotent seed account.",
+      "specification": "validateRegistrationInput collects ALL violated fields at once keyed by field name. Username: 1-39 lowercase ASCII letters/digits/single hyphens, no leading or trailing hyphen (USERNAME_PATTERN). Email: trimmed, exactly one '@', length <= 254, at least one dot and non-empty labels after '@'. Password: 12-128 chars, at least one uppercase, one lowercase, one digit, one non-alphanumeric, no whitespace. Confirmation must match. Terms must be accepted. registerAccount returns { ok: true, user } after inserting a sign-in-capable row with email_verified = 1, or { ok: false, fieldErrors } with FIELD_MESSAGES.usernameExists / emailExists for conflicts and never a partially created account. authenticateUser accepts either usable identifier (username or email) plus the password and returns the public user. createSession/loadSessionUser/destroySession persist and resolve opaque tokens in the sessions table so GET /session survives reload. ensureSeedAccount idempotently upserts the scenario seed account ('alice-dev', 'alice.dev@example.test', 'Valid-password-123!', email_verified = 1) through db_runtime with INSERT OR IGNORE/upsert semantics and is safe to call repeatedly. All persistence goes through backend/src/database/db_runtime.js helpers; never secrets or plaintext passwords are returned. Body currently throws explicit not-implemented errors — TDD implements them.",
+      "inputs": "Registration/credential/session inputs from the route layer; no direct HTTP access.",
+      "outputs": "Typed results: { ok, user | fieldErrors }, public user projections, session tokens, and void for seed/logout.",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "unit tests per rule: invalid username with leading hyphen, 'not-an-email', 'short'/'different' password, unchecked terms all reported together",
+        "duplicate username with a fresh email reports 'Username already exists' and creates nothing",
+        "successful registration stores a verified email and never returns the password or hash",
+        "authenticateUser succeeds for the newly registered account and for the seeded account",
+        "ensureSeedAccount is idempotent across repeated runs"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-DB-SCHEMA",
+      "req_id": "REQ-1-1-1",
+      "type": "DB",
+      "name": "users and sessions schema",
+      "file_path": "backend/src/database/init_db.js",
+      "first_line": "const fs = require('fs');",
+      "responsibility": "Owns the persistence contract for accounts and durable sessions: a users table holding the identity (unique username, unique email), stored password hash and verified-email flag, plus a sessions table binding opaque tokens to users.",
+      "specification": "users(id INTEGER PK AUTOINCREMENT, username TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, email_verified INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT datetime('now')); sessions(token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TEXT NOT NULL DEFAULT datetime('now')). Created idempotently with CREATE TABLE IF NOT EXISTS inside initializeDatabase so the existing bootstrap path owns schema lifecycle; no feature-local connection or table creation is permitted. Successful registration inserts email_verified = 1 and no subsequent email-verification page exists.",
+      "inputs": "initializeDatabase() from the shared bootstrap; statements executed via db_runtime helpers.",
+      "outputs": "Persistent SQLite tables available to authService on every normal startup.",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "schema is created idempotently on repeated initializeDatabase calls",
+        "unique constraints on username and email enforce duplicate rejection at the DB layer",
+        "an isolated test DB created through test_harness exposes both tables"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-DB-SEED-ENTRYPOINT",
+      "req_id": "REQ-1-1-1",
+      "type": "DB",
+      "name": "seedDatabase wiring for the sign-in-capable baseline account",
+      "file_path": "backend/src/database/seed_db.js",
+      "first_line": "const { closeDb } = require('./init_db');",
+      "responsibility": "Deterministic, idempotent application-level seeding of the pre-existing account required by the scenarios (username 'alice-dev', email 'alice.dev@example.test', password 'Valid-password-123!', email verified) so the account is sign-in capable through the normal UI -> API -> FUNC -> DB path.",
+      "specification": "seedDatabase() stays the shared entrypoint, runs inside withTransaction, and delegates to authService.ensureSeedAccount() so seeding reuses the single owner of hashing/insert rules instead of duplicating insert SQL. Safe to run at every startup/reset: repeated invocation must not duplicate or mutate the account, and must never be implemented as a test-only fixture endpoint or frontend constant. NOTE: this wiring edit could not be materialized in DESIGN because the stage's 8-file skeleton budget was already used; TDD must apply it to the existing seed_db.js.",
+      "inputs": "seedDatabase() invoked from backend startup/dev scripts or test setup through the shared scaffold.",
+      "outputs": "The seeded verified account row readable by authenticateUser and loadSessionUser.",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "after seeding, signing in with 'alice-dev' / 'Valid-password-123!' succeeds and the seeded email is verified",
+        "seeding twice leaves exactly one account row",
+        "the seeded row is reached through the real repository/service path, not a fixture shortcut"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-UI-APP-ROUTES",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "App route table with auth session provider and /signup route",
+      "file_path": "frontend/src/App.tsx",
+      "first_line": "import { Route, Routes } from 'react-router-dom';",
+      "responsibility": "Mount point that wraps the route tree in the shared AuthSessionProvider and registers the registration route reachable from the sign-in page's 'Create an account' link.",
+      "specification": "App renders AuthSessionProvider around Routes and registers '/signup' -> RegisterPage alongside the existing '/' HomePage route, whose 'Sign in' control leads to the account-access page. This keeps the leaf reachable through the real hosted runtime instead of an orphan component. Estimated final file size is about 20 lines, far below the 500-line extraction threshold. NOTE: this wiring could not be materialized in DESIGN because the 8-file skeleton budget was already used; TDD must apply it to the existing App.tsx.",
+      "inputs": "BrowserRouter from frontend/src/main.tsx.",
+      "outputs": "Rendered route tree with the registration page mounted inside the global session provider.",
+      "callers": [],
+      "callees": [],
+      "test_focus": [
+        "navigating from the home page through Sign in and then the registration link reaches the registration form",
+        "the /signup route renders inside the session provider so auth state is shared"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    }
+  ],
+  "materialized_files": [
+    "backend/src/database/init_db.js",
+    "backend/src/services/auth_service.js",
+    "backend/src/routes/auth_routes.js",
+    "backend/src/app.js",
+    "frontend/src/features/auth/auth_api.ts",
+    "frontend/src/features/auth/AuthSessionProvider.tsx",
+    "frontend/src/features/auth/useRegistrationForm.ts",
+    "frontend/src/pages/RegisterPage.tsx"
+  ],
+  "test_artifacts": [
+    {
+      "test_id": "REQ-1-1-1-FE-REGISTRATION-PAGE-INT",
+      "req_id": "REQ-1-1-1",
+      "interface_ids": [
+        "REQ-1-1-1-UI-REGISTER-PAGE",
+        "REQ-1-1-1-UI-REGISTRATION-FORM-HOOK",
+        "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+        "REQ-1-1-1-API-AUTH-CLIENT"
+      ],
+      "type": "Integration",
+      "file_path": "frontend/tests/auth/registration_page.test.tsx",
+      "first_line": "import { beforeEach, describe, expect, it, vi } from 'vitest';"
+    },
+    {
+      "test_id": "REQ-1-1-1-FE-REGISTRATION-SESSION-INT",
+      "req_id": "REQ-1-1-1",
+      "interface_ids": [
+        "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+        "REQ-1-1-1-API-AUTH-CLIENT",
+        "REQ-1-1-1-UI-REGISTRATION-FORM-HOOK"
+      ],
+      "type": "Integration",
+      "file_path": "frontend/tests/auth/registration_session_state.test.tsx",
+      "first_line": "import { beforeEach, describe, expect, it, vi } from 'vitest';"
+    },
+    {
+      "test_id": "REQ-1-1-1-BE-AUTH-SERVICE-UNIT",
+      "req_id": "REQ-1-1-1",
+      "interface_ids": [
+        "REQ-1-1-1-FUNC-AUTH-SERVICE",
+        "REQ-1-1-1-DB-SCHEMA",
+        "REQ-1-1-1-DB-SEED-ENTRYPOINT"
+      ],
+      "type": "Unit",
+      "file_path": "backend/tests/auth/auth_service_registration.test.js",
+      "first_line": "import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';"
+    },
+    {
+      "test_id": "REQ-1-1-1-BE-AUTH-ROUTES-INT",
+      "req_id": "REQ-1-1-1",
+      "interface_ids": [
+        "REQ-1-1-1-API-AUTH-ROUTES",
+        "REQ-1-1-1-FUNC-AUTH-SERVICE",
+        "REQ-1-1-1-DB-SCHEMA",
+        "REQ-1-1-1-DB-SEED-ENTRYPOINT"
+      ],
+      "type": "Integration",
+      "file_path": "backend/tests/auth/auth_routes_register.test.js",
+      "first_line": "import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';"
+    },
+    {
+      "test_id": "REQ-1-1-1-E2E-SCENARIO-1",
+      "req_id": "REQ-1-1-1",
+      "interface_ids": [
+        "REQ-1-1-1-UI-REGISTER-PAGE",
+        "REQ-1-1-1-UI-REGISTRATION-FORM-HOOK",
+        "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+        "REQ-1-1-1-UI-APP-ROUTES",
+        "REQ-1-1-1-API-AUTH-ROUTES",
+        "REQ-1-1-1-FUNC-AUTH-SERVICE",
+        "REQ-1-1-1-DB-SEED-ENTRYPOINT"
+      ],
+      "type": "E2E",
+      "file_path": "backend/test-e2e/auth-registration-scenario-1.spec.js",
+      "first_line": "const { test, expect } = require('@playwright/test');"
+    },
+    {
+      "test_id": "REQ-1-1-1-E2E-SCENARIOS-2-3",
+      "req_id": "REQ-1-1-1",
+      "interface_ids": [
+        "REQ-1-1-1-UI-APP-ROUTES",
+        "REQ-1-1-1-UI-REGISTER-PAGE",
+        "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+        "REQ-1-1-1-API-AUTH-ROUTES",
+        "REQ-1-1-1-FUNC-AUTH-SERVICE",
+        "REQ-1-1-1-DB-SEED-ENTRYPOINT"
+      ],
+      "type": "E2E",
+      "file_path": "backend/test-e2e/auth-registration-scenarios-2-3.spec.js",
+      "first_line": "const { test, expect } = require('@playwright/test');"
+    }
+  ],
+  "resume_context": {},
+  "tdd_handoff": {
+    "last_test_type": "Integration",
+    "last_failed_output_summary": "Unit: Runner: Vitest\nBatch Test Type: Unit\nWeb Port: 3411\nBase URL: http://localhost:3411\nRequested Test Files:\n- backend/tests/auth/auth_service_registration.test.js\nBackend Working Directory: D:\\project\\hks\\work\\judge-hackathon--github-99d44e6\\backend\nFrontend Working Directory: D:\\project\\hks\\work\\judge-hackathon--github-99d44e6\\frontend\nBackend Targets:\n- tests/auth/auth_service_registration.test.js\nExit Code: 1\n=== Backend Vitest Batch ===\nExit Code: 124\nSTDERR:\nCommand timed out after 60.0 seconds.\n\nIntegration: Runner: Vitest\nBatch Test Type: Integration\nWeb Port: 3411\nBase URL: http://localhost:3411\nRequested Test Files:\n- frontend/tests/auth/registration_page.test.tsx\nBackend Working Directory: D:\\project\\hks\\work\\judge-hackathon--github-99d44e6\\backend\nFrontend Working Directory: D:\\project\\hks\\work\\judge-hackathon--github-99d44e6\\frontend\nFrontend Targets:\n- tests/auth/registration_page.test.tsx\nExit Code: 1\n=== Frontend Vitest Batch ===\nExit Code: 124\nSTDERR:\nCommand timed out after 60.0 seconds.",
+    "modified_files": []
+  }
+}
