@@ -1,0 +1,27 @@
+{
+  "node_id": "ROOT",
+  "phase_status": {
+    "design": "skipped",
+    "test": "skipped",
+    "implement": "pending"
+  },
+  "requirement_snapshot": {
+    "name": "GitHub Collaboration Platform Core Requirements",
+    "description": "This product is a simplified GitHub collaboration platform. Unless an atomic requirement explicitly allows more than one role, every quoted user-interface name is the exact English accessible name of the control; the role, scope, and observable-state rules stated by each atomic requirement are authoritative. Values described as existing accounts, organizations, teams, repositories, branches, files, commits, issues, milestones, pull requests, reviews, and permission relationships are predefined seed data. The application must provision those records before the corresponding scenario and supply each account through an isolated browser session; they are not extra features that a participant must expose through a private API. Generated names may contain a unique suffix, but their role, ownership, visibility, and relationships are exactly those stated in the atomic requirement. Every atomic requirement remains enabled even when seed configuration is incomplete. All write operations must be persisted on the server, checked against the current session and target-object permission, and completed atomically. Organization Owner, repository Admin, Read, Triage, Write, Maintain, and Admin permissions follow the operation-specific rules in the requirements below; these roles are not an automatic cumulative ladder. Real-time collaboration, Actions, Packages, Wiki, project boards, notification delivery, and external Git remote protocols are outside the scope of this product.",
+    "visual_reference": [],
+    "children_ids": [
+      "REQ-1",
+      "REQ-2",
+      "REQ-3",
+      "REQ-4",
+      "REQ-5",
+      "REQ-6"
+    ],
+    "dependencies": []
+  },
+  "recent_failure_summary": "",
+  "interfaces": [],
+  "materialized_files": [],
+  "test_artifacts": [],
+  "resume_context": {}
+}

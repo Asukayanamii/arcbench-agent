@@ -490,6 +490,28 @@ class WorkflowPhaseRunner:
                     f"run_tests({selected_type}) may only execute registered {selected_type} tests for the current node. "
                     f"Unknown files: {', '.join(unknown)}\n"
                 )
+            # 本层已经通过了就不要再跑。实测（第 6 轮）Unit 在 attempt 2 就已通过，却一路跑到
+            # 5/5；Integration 同样 —— 12 次带真实退出码的调用里 8 次是「已通过之后的重跑」。
+            # 代价直接计入评分：排名规则是 score -> pass rate -> **lower cost** -> 提交时间。
+            # 而且它还挤占真正需要修复时的预算（第 6 轮 Unit 的 attempt 1 是真实失败）。
+            #
+            # 放在预算检查**之前**，所以这次拒绝不消耗预算；回执给 Exit Code: 0，
+            # 与「本层已完成」的既定事实一致，也不会像耗尽那样去终止 session（见 #13）。
+            prior_exit_code = parse_test_results(result_by_type.get(selected_type, "")).get("exit_code")
+            if prior_exit_code == 0:
+                await self._log(
+                    "TestDrivenDeveloper",
+                    f"`run_tests` {selected_type} already passed; refusing to repeat it.",
+                    status="ok",
+                    node_id=node_id,
+                )
+                return (
+                    "Exit Code: 0\n"
+                    "STDOUT:\n"
+                    f"The `{selected_type}` layer already passed for this node and is recorded as complete. "
+                    "No test was run: repeating a passing run spends the layer budget without adding evidence. "
+                    "Return `IMPLEMENTED`.\n"
+                )
             used = usage_by_type[selected_type]
             if used >= TDD_RUN_TESTS_BUDGET:
                 await self._log(
