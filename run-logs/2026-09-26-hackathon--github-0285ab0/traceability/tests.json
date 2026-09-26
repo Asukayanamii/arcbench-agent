@@ -1,0 +1,107 @@
+{
+  "REQ-1-1-1-BACKEND-PASSWORD-UTILS-UNIT": {
+    "test_id": "REQ-1-1-1-BACKEND-PASSWORD-UTILS-UNIT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-FUNC-PASSWORD-UTILS"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/services/password_utils.test.js",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-BACKEND-REGISTER-API-INTEGRATION": {
+    "test_id": "REQ-1-1-1-BACKEND-REGISTER-API-INTEGRATION",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-API-REGISTER-ROUTE",
+      "REQ-1-1-1-API-SESSION-ROUTES",
+      "REQ-1-1-1-FUNC-REGISTRATION-SERVICE",
+      "REQ-1-1-1-DB-AUTH-REPOSITORY",
+      "REQ-1-1-1-DB-AUTH-SCHEMA",
+      "REQ-1-1-1-DB-SEED-BOOTSTRAP"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/api/register_api.test.js",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-E2E-REGISTER-ACCOUNT-SCENARIOS": {
+    "test_id": "REQ-1-1-1-E2E-REGISTER-ACCOUNT-SCENARIOS",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-UI-SIGNIN-LINK",
+      "REQ-1-1-1-UI-SESSION-CONTEXT",
+      "REQ-1-1-1-API-AUTH-CLIENT",
+      "REQ-1-1-1-API-REGISTER-ROUTE",
+      "REQ-1-1-1-API-SESSION-ROUTES",
+      "REQ-1-1-1-FUNC-VALIDATION-RULES",
+      "REQ-1-1-1-FUNC-REGISTRATION-SERVICE",
+      "REQ-1-1-1-DB-AUTH-SCHEMA",
+      "REQ-1-1-1-DB-SEED-BOOTSTRAP"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/register_account.e2e.js",
+    "passed": false,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-FRONTEND-AUTH-CLIENT-INTEGRATION": {
+    "test_id": "REQ-1-1-1-FRONTEND-AUTH-CLIENT-INTEGRATION",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-API-AUTH-CLIENT",
+      "REQ-1-1-1-API-REGISTER-ROUTE",
+      "REQ-1-1-1-API-SESSION-ROUTES"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/features/auth/authApi.test.ts",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-FRONTEND-REGISTER-PAGE-INTEGRATION": {
+    "test_id": "REQ-1-1-1-FRONTEND-REGISTER-PAGE-INTEGRATION",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-UI-SIGNIN-LINK",
+      "REQ-1-1-1-FUNC-VALIDATION-RULES",
+      "REQ-1-1-1-API-AUTH-CLIENT",
+      "REQ-1-1-1-UI-SESSION-CONTEXT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/features/auth/RegisterPage.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-FRONTEND-SESSION-CONTEXT-INTEGRATION": {
+    "test_id": "REQ-1-1-1-FRONTEND-SESSION-CONTEXT-INTEGRATION",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-SESSION-CONTEXT",
+      "REQ-1-1-1-API-AUTH-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/features/auth/SessionContext.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-FRONTEND-VALIDATION-RULES-UNIT": {
+    "test_id": "REQ-1-1-1-FRONTEND-VALIDATION-RULES-UNIT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-FUNC-VALIDATION-RULES"
+    ],
+    "type": "Unit",
+    "file_path": "frontend/tests/features/auth/registrationRules.test.ts",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  }
+}
