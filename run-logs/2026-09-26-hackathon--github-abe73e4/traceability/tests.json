@@ -1,0 +1,136 @@
+{
+  "REQ-1-1-1-E2E-001": {
+    "test_id": "REQ-1-1-1-E2E-001",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/register-account.spec.js",
+    "passed": true,
+    "first_line": "// REQ-1-1-1 — Register a New GitHub Account (Playwright E2E over the real hosted runtime).",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INT-001": {
+    "test_id": "REQ-1-1-1-INT-001",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [],
+    "type": "Integration",
+    "file_path": "frontend/tests/RegisterPage.test.tsx",
+    "passed": true,
+    "first_line": "// REQ-1-1-1 — Register a New GitHub Account (frontend integration, hosted runtime paths).",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INT-002": {
+    "test_id": "REQ-1-1-1-INT-002",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [],
+    "type": "Integration",
+    "file_path": "backend/tests/auth_register_account.test.js",
+    "passed": true,
+    "first_line": "// REQ-1-1-1 — Register a New GitHub Account (backend integration).",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-E2E-SIGN-IN-ACCOUNT": {
+    "test_id": "REQ-1-1-2-E2E-SIGN-IN-ACCOUNT",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-UI-SIGNIN-FORM",
+      "REQ-1-1-2-UI-SESSION-PROVIDER",
+      "REQ-1-1-2-UI-ACCOUNT-MENU",
+      "REQ-1-1-2-UI-PROTECTED-ROUTE",
+      "REQ-1-1-2-UI-WORKSPACE-PAGE",
+      "REQ-1-1-2-API-AUTH-CLIENT",
+      "REQ-1-1-2-API-AUTH-ROUTES",
+      "REQ-1-1-2-FUNC-AUTH-SERVICE",
+      "REQ-1-1-2-FUNC-SESSION-CONTEXT",
+      "REQ-1-1-2-DB-SESSION-SCHEMA",
+      "REQ-1-1-2-DB-SEED-ACCOUNTS"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/sign-in-account.spec.js",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-INT-AUTH-ROUTES": {
+    "test_id": "REQ-1-1-2-INT-AUTH-ROUTES",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-API-AUTH-ROUTES",
+      "REQ-1-1-2-FUNC-AUTH-SERVICE",
+      "REQ-1-1-2-DB-SESSION-SCHEMA"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/auth_sign_in.test.js",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-INT-SESSION-SCHEMA": {
+    "test_id": "REQ-1-1-2-INT-SESSION-SCHEMA",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-DB-SESSION-SCHEMA",
+      "REQ-1-1-2-DB-SEED-ACCOUNTS"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/auth_session_schema.test.js",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-INT-SIGNIN-FLOW": {
+    "test_id": "REQ-1-1-2-INT-SIGNIN-FLOW",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-UI-SIGNIN-FORM",
+      "REQ-1-1-2-UI-SESSION-PROVIDER",
+      "REQ-1-1-2-UI-PROTECTED-ROUTE",
+      "REQ-1-1-2-UI-WORKSPACE-PAGE",
+      "REQ-1-1-2-API-AUTH-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/AppSignInFlow.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-UNIT-ACCOUNT-MENU": {
+    "test_id": "REQ-1-1-2-UNIT-ACCOUNT-MENU",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-UI-ACCOUNT-MENU",
+      "REQ-1-1-2-UI-SESSION-PROVIDER"
+    ],
+    "type": "Unit",
+    "file_path": "frontend/tests/AccountMenu.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-UNIT-SESSION-PROVIDER": {
+    "test_id": "REQ-1-1-2-UNIT-SESSION-PROVIDER",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-UI-SESSION-PROVIDER",
+      "REQ-1-1-2-API-AUTH-CLIENT"
+    ],
+    "type": "Unit",
+    "file_path": "frontend/tests/SessionProvider.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-UNIT-SIGNIN-FORM": {
+    "test_id": "REQ-1-1-2-UNIT-SIGNIN-FORM",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-UI-SIGNIN-FORM",
+      "REQ-1-1-2-API-AUTH-CLIENT"
+    ],
+    "type": "Unit",
+    "file_path": "frontend/tests/SignInPage.test.tsx",
+    "passed": true,
+    "first_line": "1",
+    "scenario_id": null
+  }
+}
