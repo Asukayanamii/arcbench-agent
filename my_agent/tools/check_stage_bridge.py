@@ -1105,6 +1105,51 @@ def check_a_passed_layer_is_not_rerun() -> None:
           "already passed for this node" in source and '"Exit Code: 0\\n"' in source)
 
 
+def check_engine_state_dir_is_not_searchable() -> None:
+    """`.arc/` 必须在检索工具的默认排除里（issue #36）。
+
+    ARC 引擎把自己的状态写进 agent 的 `/workspace` 的 `.arc/` 下（debug.log、
+    processing_queue.json、node_sessions/、traceability/）。这些对 agent 没有任何可读价值，
+    却是实打实的噪音：
+
+    * 第 4 轮 grep 命中 `.arc/debug.log:10460:`
+    * 第 8 轮 grep 命中我们自己的 stdout 转储 `runner-stdout.txt:7297:`
+    * 第 7 轮的 `debug.log` 有 **2.8 MB**，读进来就是几万 token
+    * 更糟的是日志里全是**历史**测试输出，可能让 agent 去修已经修好的东西
+
+    `grep` 与 `find` 都经 `common.walk_files` 枚举 —— 所以排除加在 `SKIP_DIRS` 里就能
+    同时覆盖两者。这条检查做行为验证：真造一棵含 `.arc/` 的树，看它会不会被枚举出来。
+    """
+
+    print()
+    print("--- the engine state dir is not searchable ---")
+
+    import tempfile  # noqa: PLC0415
+
+    from app.agent.tools import common as tool_common  # noqa: PLC0415
+
+    check(".arc is in the default skip set", ".arc" in tool_common.SKIP_DIRS)
+
+    with tempfile.TemporaryDirectory(prefix="arc-skip-probe-") as tmp:
+        root = Path(tmp)
+        (root / ".arc").mkdir()
+        (root / ".arc" / "debug.log").write_text("noise\n", encoding="utf-8")
+        (root / "src").mkdir()
+        (root / "src" / "app.js").write_text("code\n", encoding="utf-8")
+
+        found = {p.relative_to(root).as_posix() for p in tool_common.walk_files(root)}
+
+    check("a file under .arc/ is not enumerated",
+          ".arc/debug.log" not in found, f"got {sorted(found)}")
+    check("a real source file still is",
+          "src/app.js" in found, f"got {sorted(found)}")
+
+    grep_src = (REPO / "app" / "agent" / "tools" / "grep.py").read_text(encoding="utf-8", errors="replace")
+    find_src = (REPO / "app" / "agent" / "tools" / "find.py").read_text(encoding="utf-8", errors="replace")
+    check("grep enumerates through walk_files", "walk_files(" in grep_src)
+    check("find enumerates through walk_files", "walk_files(" in find_src)
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1123,6 +1168,7 @@ def main() -> int:
     check_install_is_verified_not_assumed()
     check_install_requests_dev_dependencies()
     check_a_passed_layer_is_not_rerun()
+    check_engine_state_dir_is_not_searchable()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()
