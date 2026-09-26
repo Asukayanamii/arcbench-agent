@@ -1,6 +1,6 @@
 """Pre-flight checks for the ARC stage bridge.
 
-Three invariants that only fail with a *real* model (the mock never exercised them, so
+Four invariants that only fail with a *real* model (the mock never exercised them, so
 the first platform run was where they surfaced):
 
 1. **The skill selector and the skill reader must use the same root.** The selector
@@ -22,6 +22,12 @@ the first platform run was where they surfaced):
    the documented unlock unreachable: one write to a path locked it for the rest of the
    stage, so an agent that generated a broken test file could not repair it. That
    deadlocked 133 tool calls in a single platform run (REQ-1.1: 98, REQ-1.2: 35).
+
+4. **That unlock rests on a text contract nothing else guards.** Fixing (3) moved the
+   failure test into string matching on `Exit Code:`. Rename that marker in any producer
+   and the guard stops unlocking again - silently, with every other check still green.
+   So the marker is pinned from both sides: the producer modules must still emit it, and
+   the guard must agree with an independent parser on the same bytes.
 
 Run before packaging:
 
@@ -47,8 +53,27 @@ from langchain_core.tools import StructuredTool  # noqa: E402
 from agents.runtime import stage_policy, workspace_tools  # noqa: E402
 from agents.skills import selection  # noqa: E402
 from app.agent.runtime import current_workspace  # noqa: E402
+from app_type_handler import test_results  # noqa: E402
 
 failures: list[str] = []
+
+# The text contract the guard's unlock depends on. Declared here **independently**
+# of the guard on purpose: this file is the witness, so it must not read the
+# marker back out of `stage_policy`.
+EXIT_CODE_MARKER = "Exit Code:"
+
+# Every module that writes or parses that contract. An explicit list, not a glob -
+# a renamed file must break the check, not quietly drop out of its coverage.
+VALIDATION_OUTPUT_SOURCES = (
+    "app_type_handler/base.py",
+    "app_type_handler/web.py",
+    "app_type_handler/cli.py",
+    "app_type_handler/android.py",
+    "app_type_handler/test_results.py",
+    "core/phases.py",
+    "agents/tools/build.py",
+    "agents/test_driven_developer.py",
+)
 
 
 def check(label: str, ok: bool, detail: str = "") -> None:
@@ -310,6 +335,56 @@ def check_guard_unlocks_after_a_failing_validation() -> None:
           not reread.startswith(stage_policy.BLOCKED_PREFIX), reread[:120])
 
 
+def check_guard_reads_the_real_validation_format() -> None:
+    """The guard's unlock rests on a text contract - prove the two sides still agree.
+
+    `_tool_result_failed` decides success by looking for `Exit Code:` in the tool's
+    *text*. Nothing else ties the guard to the code that writes that text: rename the
+    marker and the guard simply stops unlocking, silently re-arming the deadlock while
+    every other check stays green.
+
+    Two independent witnesses:
+      1. every producer/parser module still emits the literal marker;
+      2. the guard and the real parser (`test_results.parse_test_results`) reach the
+         same verdict on the same bytes.
+    """
+
+    print()
+    print("--- guard reads the real validation output format ---")
+
+    for relative in VALIDATION_OUTPUT_SOURCES:
+        source = REPO / relative
+        text = source.read_text(encoding="utf-8", errors="replace") if source.is_file() else ""
+        found = EXIT_CODE_MARKER in text
+        check(
+            f"{relative} still emits `{EXIT_CODE_MARKER}`",
+            found,
+            "" if found else "marker renamed - update stage_policy._tool_result_failed "
+                             "and this list together",
+        )
+
+    failing = "Runner: Vitest\nExit Code: 1\nSTDERR:\nFAIL tests/authSchema.test.js\n"
+    passing = "Runner: Vitest\nExit Code: 0\nSTDOUT:\nTest Files  3 passed (3)\n"
+    unmarked = "Runner: Vitest\nrunner crashed before reporting\n"
+
+    check("guard: a non-zero exit reads as failure", stage_policy._tool_result_failed(failing))
+    check("guard: a zero exit does not", not stage_policy._tool_result_failed(passing))
+    check("guard: output without the marker does not unlock",
+          not stage_policy._tool_result_failed(unmarked))
+
+    parsed_failing = test_results.parse_test_results(failing)["exit_code"]
+    parsed_passing = test_results.parse_test_results(passing)["exit_code"]
+    check("parser reads the failing output as non-zero",
+          parsed_failing != 0, f"exit_code={parsed_failing}")
+    check("parser reads the passing output as zero",
+          parsed_passing == 0, f"exit_code={parsed_passing}")
+    check(
+        "guard and parser reach the same verdict",
+        stage_policy._tool_result_failed(failing) == (parsed_failing != 0)
+        and stage_policy._tool_result_failed(passing) == (parsed_passing != 0),
+    )
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -317,6 +392,7 @@ def main() -> int:
     check_stage_limits_are_published()
     check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()
+    check_guard_reads_the_real_validation_format()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0
