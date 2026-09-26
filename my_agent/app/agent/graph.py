@@ -14,7 +14,7 @@ from langgraph.config import get_config
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import tools_condition
 
-from app.agent.compaction.policy import with_summary
+from app.agent.compaction.policy import summary_message
 from app.agent.compaction.runtime import COMPACT_NODE, compact_once
 from app.agent.messages import usable_compaction
 from app.agent.models import build_model, build_summary_model
@@ -112,7 +112,8 @@ def build_graph(
         """
         节点本身无状态：每轮都把 system prompt 重新拼在历史前面，历史来自 checkpointer。
 
-        压缩过的会话发的是"摘要 + 首条用户消息 + 切点起的原文"（只压视图，原文还在检查点里）。
+        压缩过的会话发的是「首条用户消息 + 摘要消息 + 切点起的原文」（只压视图，原文还在
+        检查点里；摘要不进 system，否则压缩后第一次调用的前缀缓存整段失效）。
         `usage_anchor` 记的是这次请求 provider 实报的 input tokens 与"覆盖到第几条**状态里的**
         消息"——之后追加多少条，下一轮就只粗估那几条。
         """
@@ -128,8 +129,14 @@ def build_graph(
             else build_system_prompt((config.get("configurable") or {}).get("workspace"))
         )
         if usable_compaction(compaction, len(messages)):
-            prompt = with_summary(prompt, compaction["summary"])
-            messages = [messages[0], *messages[compaction["from_index"] :]]
+            # 摘要是一条独立消息、插在首条用户消息之后，system 保持原样——
+            # system 一变，压缩后第一次调用的前缀缓存就从 system 末尾整段失效
+            # （平台实测 cache_read 恒等 4096）。见 compaction.policy.SUMMARY_MESSAGE。
+            messages = [
+                messages[0],
+                summary_message(compaction["summary"]),
+                *messages[compaction["from_index"] :],
+            ]
         elif compaction:
             logger.warning(
                 "压缩锚点越界，本次按全量发送 from_index=%s 共%d条",
