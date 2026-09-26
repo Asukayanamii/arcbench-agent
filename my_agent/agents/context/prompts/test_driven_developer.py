@@ -83,7 +83,18 @@ def get_user_prompt(
     test_type: str,
     node_tests: list[dict],
     previous_failure_summary: str = "",
+    run_tests_budget: int | None = None,
 ) -> str:
+    # 预算文案从**调用方传进来的真实值**渲染，不写死数字。
+    # 原先这里硬编码 "10 calls"，而 core/phases.py 的 TDD_RUN_TESTS_BUDGET 是 5 ——
+    # 模型以为还有余量，于是收到 "budget exhausted at 5/5" 时不信、当成瞬时故障继续试，
+    # 实测盲改了 40 多分钟。同类问题见 stage_policy.render_stage_limits：
+    # 「谁执行规则，谁就得公布规则」，而且文案必须由常量派生，否则两边必然分叉。
+    budget_clause = (
+        f"a fixed `run_tests` budget of {run_tests_budget} calls per layer"
+        if run_tests_budget is not None
+        else "no fixed `run_tests` budget per layer"
+    )
     ordered_layers: list[dict[str, object]] = []
     for layer in ("Unit", "Integration", "E2E"):
         files = [
@@ -123,7 +134,7 @@ def get_user_prompt(
                 "`run_tests()` with no arguments runs the active current-node test layer.",
                 "You may call `run_tests(test_type='Unit'|'Integration'|'E2E')` only for the active layer; the tool will reject attempts to run a non-active layer.",
                 "You may call `run_tests(test_files=[...])` to run specific current-node test files from the manifest.",
-                "Each test layer has a fixed `run_tests` budget of 10 calls. Use each failed run to inspect the named files, make a concrete repair, and only then spend the next call.",
+                f"Each test layer has {budget_clause}. Use each failed run to inspect the named files, make a concrete repair, and only then spend the next call.",
                 "Do not use `run_tests` as the first action unless this batch has a previous failure handoff and the implementation has already had an initial pass.",
                 "Use the current interface contract, generated tests, and latest raw failure output to localize the problem before searching beyond the failing layer.",
                 "After a failed `run_tests`, inspect the failing test file and the nearest owner file named or implied by the error before any broader search.",
