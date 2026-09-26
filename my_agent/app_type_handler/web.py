@@ -20,23 +20,105 @@ async def _emit_log(log_cb: Callable[..., Awaitable[None] | None], *args) -> Non
         await result
 
 
-async def run_npm_install(target_dir: str, log_cb: Callable[..., Awaitable[None] | None]):
+def _missing_declared_dependencies(target_dir: str) -> list[str]:
+    """列出 `package.json` 声明、但 `node_modules` 里并不存在的依赖。
+
+    存在的理由是一次实跑（issue #26）：`run_npm_install` 只看 `returncode == 0` 就打印
+    "NPM install success"，而 backend 的 `node_modules/.bin` 里最终只有 node-gyp /
+    prebuild-install / rimraf 这些原生模块的构建工具链 —— 测试与构建工具一个都没有
+    （Windows 上 sqlite3 类原生依赖装挂很常见，npm 的退出码却仍是 0）。于是一路报成功，
+    直到 `run_build` 打出 `'vite' is not recognized` 才暴露，而此时 TDD 已经把整层预算耗光。
+
+    判定用「包名目录是否存在」而不是「能不能 require」：零副作用、够快，而且正是缺包时
+    最直接的证据。作用域包（`@scope/name`）要按路径展开成两级。
+    """
+
+    package_json = os.path.join(target_dir, "package.json")
+    if not os.path.isfile(package_json):
+        return []
     try:
-        process = await asyncio.create_subprocess_shell(
-            "npm install",
-            cwd=target_dir,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            # 自成一个进程组/会话，超时或被取消时才能整棵树收掉（见 core.processes）。
-            start_new_session=True,
-        )
-        _, stderr = await process.communicate()
-        if process.returncode == 0:
+        with open(package_json, encoding="utf-8") as handle:
+            manifest = json.load(handle)
+    except Exception:
+        return []
+    if not isinstance(manifest, dict):
+        return []
+
+    declared: list[str] = []
+    for section in ("dependencies", "devDependencies", "optionalDependencies"):
+        values = manifest.get(section)
+        if isinstance(values, dict):
+            declared.extend(str(name) for name in values)
+
+    return [
+        name
+        for name in declared
+        if not os.path.exists(os.path.join(target_dir, "node_modules", *name.split("/")))
+    ]
+
+
+async def run_npm_install(target_dir: str, log_cb: Callable[..., Awaitable[None] | None]) -> None:
+    """装依赖，并且**校验真的装上了**才算成功。
+
+    这里修的是 issue #26 的主缺陷：原来的判断只有 `returncode == 0`。另外两处一并修掉 ——
+    原来那句 `await process.communicate()` **没有任何超时**（安装挂住会拖死整个阶段），
+    而且失败了只报一句 "non-zero exit code"，把已经抓到的 npm `stderr` 丢掉。
+
+    失败时重试一次：原生模块装挂常与缓存/并发有关，重试的收益远大于成本。
+    """
+
+    timeout = max(300.0, _default_test_command_timeout())
+    for attempt in (1, 2):
+        output = ""
+        returncode = -1
+        try:
+            process = await asyncio.create_subprocess_shell(
+                "npm install",
+                cwd=target_dir,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                # 自成一个进程组/会话，超时或被取消时才能整棵树收掉（见 core.processes）。
+                start_new_session=True,
+            )
+            try:
+                stdout, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=timeout
+                )
+                returncode = int(process.returncode or 0)
+            except asyncio.TimeoutError:
+                await finalize_subprocess(process, force_kill=True)
+                await _emit_log(
+                    log_cb,
+                    "System",
+                    f"NPM install timed out after {timeout:.0f}s in {target_dir} (attempt {attempt}/2).",
+                )
+                continue
+            output = (stdout + stderr).decode("utf-8", errors="replace").strip()
+        except Exception as exc:
+            await _emit_log(log_cb, "System", f"NPM install error in {target_dir}: {exc}")
+            continue
+
+        missing = _missing_declared_dependencies(target_dir)
+        if returncode == 0 and not missing:
             await _emit_log(log_cb, "System", f"NPM install success in {target_dir}")
-        else:
-            await _emit_log(log_cb, "System", f"NPM install failed in {target_dir}: dependency installation returned a non-zero exit code.")
-    except Exception as exc:
-        await _emit_log(log_cb, "System", f"NPM install error: {str(exc)}")
+            return
+
+        # 「退出码 0 但依赖不全」是最坑的一种失败：不点名的话，下游只会看到
+        # 'vite' is not recognized 这类现象，而那时 TDD 预算已经烧掉了。
+        reasons = []
+        if returncode != 0:
+            reasons.append(f"npm exited {returncode}")
+        if missing:
+            shown = ", ".join(missing[:8]) + ("..." if len(missing) > 8 else "")
+            reasons.append(f"{len(missing)} declared package(s) missing from node_modules: {shown}")
+        detail = "; ".join(reasons) or "unknown reason"
+        tail = output[-1200:] if output else "(npm produced no output)"
+        await _emit_log(
+            log_cb,
+            "System",
+            f"NPM install did NOT complete in {target_dir} (attempt {attempt}/2): {detail}\n"
+            f"----- npm output (tail) -----\n{tail}",
+        )
 
 
 def _local_node_binary(working_dir: str, name: str) -> str | None:
