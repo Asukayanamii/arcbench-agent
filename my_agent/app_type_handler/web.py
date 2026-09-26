@@ -39,12 +39,60 @@ async def run_npm_install(target_dir: str, log_cb: Callable[..., Awaitable[None]
         await _emit_log(log_cb, "System", f"NPM install error: {str(exc)}")
 
 
+def _default_test_command_timeout() -> float:
+    """测试命令的默认超时秒数，可用 `ARC_TEST_COMMAND_TIMEOUT` 覆盖。
+
+    默认值**保持 60.0 不变** —— 平台是 Linux 容器，比本地 Windows 快得多，
+    不能因为本地慢就把平台行为改了。
+
+    之所以要可配：这个 60 秒在本地是**无法绕过**的。agent 收到一次「失败」，
+    而超时值在它自己的配置里、不在 `/workspace`，提示词却要求它就地修 harness ——
+    它没有任何杠杆，只能把整层预算反复花在重试上。实测一轮里 32 次超时占掉一半墙钟，
+    Unit/Integration 10/15 个预算槽位没产出任何关于被测代码的信息（issue #21）。
+    """
+
+    raw = str(os.environ.get("ARC_TEST_COMMAND_TIMEOUT", "") or "").strip()
+    if not raw:
+        return 60.0
+    try:
+        value = float(raw)
+    except ValueError:
+        return 60.0
+    return value if value > 0 else 60.0
+
+
+def _batch_exit_code(exit_codes: list[int]) -> int:
+    """把多个子批次的退出码归并成写进外层信封的那一个。
+
+    外层信封的退出码是 `test_results.parse_test_results` **唯一会读**的那个
+    （它取第一个 `Exit Code:` 行就 `break`），所以这里是整条链上真正承重的一步。
+
+    **不能把非零一律塌缩成 1**：那样「测试跑了且失败」与「测试根本没跑完」在层判定和
+    失败摘要里就不可区分，而这两者对下一步该做什么的指向完全相反。实测那次
+    Unit 5/5 与 Integration 5/5 全被判成「失败」，实际是 60 秒超时（内部是 124），
+    agent 于是把 10 个预算槽位花在「修」一个可能本来就正确的实现上（issue #21）。
+
+    124 是 `timeout(1)` 的约定退出码，同文件的超时分支和 E2E 分支用的都是它 ——
+    这里只是让 unit/integration 与它们一致。
+    """
+
+    if not exit_codes:
+        return 1
+    if all(code == 0 for code in exit_codes):
+        return 0
+    if 124 in exit_codes:
+        return 124
+    return 1
+
+
 async def _execute_web_test_command(
     command: str,
     cwd: str,
-    timeout: float = 60.0,
+    timeout: float | None = None,
     extra_env: dict[str, str] | None = None,
 ) -> str:
+    if timeout is None:
+        timeout = _default_test_command_timeout()
     process = None
     try:
         process = await asyncio.create_subprocess_shell(
@@ -965,8 +1013,14 @@ class WebAppType(AppTypeHandler):
                     "Exit Code: 1\nSTDERR:\nNo resolvable Vitest targets were found for this batch.\n",
                 )
 
-            batch_exit_code = 0 if exit_codes and all(code == 0 for code in exit_codes) else 1
+            batch_exit_code = _batch_exit_code(exit_codes)
             body = f"Exit Code: {batch_exit_code}\n\n" + "\n\n".join(sections)
+            if 124 in exit_codes:
+                body += (
+                    "\n\n[ARC] At least one sub-batch did not finish within the command timeout "
+                    "(Exit Code: 124). The tests did not run to completion, so this is not a test "
+                    "assertion failure - the named test files may be untested rather than wrong.\n"
+                )
             return _prepend_group_execution_header(execution, body)
 
         build_ok, frontend_build_output = await _build_frontend_dist(self.workspace_path)
