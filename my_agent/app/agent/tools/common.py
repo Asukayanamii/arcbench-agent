@@ -32,6 +32,14 @@ SKIP_DIRS = {
     ".git",
     ".hg",
     ".svn",
+    # ARC 引擎自己的状态目录。它**在 agent 的 /workspace 里**，但没有任何 agent 该读的内容 ——
+    # 全是宿主状态与历史日志（debug.log / processing_queue.json / node_sessions / traceability）。
+    #
+    # 实测代价（issue #36）：第 4 轮 grep 命中 `.arc/debug.log:10460:`，第 8 轮命中
+    # `runner-stdout.txt:7297:`。第 7 轮的 debug.log 有 **2.8 MB**，agent 一旦 read_file
+    # 就是几万 token 的纯噪音；而且日志里全是**历史**测试输出（曾经失败、后来修好的那些），
+    # 可能让它去修已经修好的东西。
+    ".arc",
     "__pycache__",
     "node_modules",
     ".venv",
