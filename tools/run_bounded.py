@@ -55,7 +55,12 @@ if out_dir.exists():
 env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
 started = time.time()
 # stdout 写文件而不是 PIPE：没人读的 PIPE 会被 64KB 缓冲填满，**子进程会卡死在写 stdout 上**。
+#
+# 关键：这个文件必须放在**输出工作区之外**。第一版放在 out_dir 里，结果 agent 的 grep
+# 直接命中它（日志里出现 `runner-stdout.txt:7297: ...`），于是它开始读我们自己的 stdout 转储 ——
+# 既污染搜索结果，又白烧上下文。工作区是 agent 的 /workspace，往里丢宿主的诊断文件就是给它添噪音。
 out_dir.mkdir(parents=True, exist_ok=True)
+stdout_path = out_dir.parent / f"{out_dir.name}-runner-stdout.txt"
 proc = subprocess.Popen(
     [
         PYTHON, "-u", "main.py",
@@ -65,7 +70,7 @@ proc = subprocess.Popen(
     ],
     cwd=str(MY_AGENT),
     env=env,
-    stdout=(out_dir / "runner-stdout.txt").open("w", encoding="utf-8", errors="replace"),
+    stdout=stdout_path.open("w", encoding="utf-8", errors="replace"),
     stderr=subprocess.STDOUT,
 )
 
