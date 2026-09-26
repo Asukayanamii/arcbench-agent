@@ -477,6 +477,45 @@ def check_timeout_output_is_classified_as_failure() -> None:
           parsed > 0, f"exit_code={parsed}（-1 表示没解析出来）")
 
 
+def check_published_budget_matches_the_enforced_one() -> None:
+    """提示词里公布的 `run_tests` 预算，必须等于执行层**真正强制**的那个数。
+
+    原先提示词里硬编码 "a fixed `run_tests` budget of 10 calls"，而
+    `core/phases.py` 的 `TDD_RUN_TESTS_BUDGET` 是 **5**（见 issue #10）。模型以为还有余量，
+    于是收到 "budget exhausted at 5/5" 时不信、当成瞬时故障继续试 —— 实测盲改了 40 多分钟
+    （见 issue #13）。
+
+    这和 `render_stage_limits` 是同一类问题：**谁执行规则谁就得公布规则，而且文案必须由
+    常量派生**。这条检查就是钉住那个派生关系，防止以后有人改了一边忘了另一边。
+    """
+
+    print()
+    print("--- published run_tests budget matches the enforced one ---")
+
+    from agents.context.prompts import test_driven_developer as tdd_prompt  # noqa: PLC0415
+    from core.phases import TDD_RUN_TESTS_BUDGET  # noqa: PLC0415
+
+    prompt = tdd_prompt.get_user_prompt(
+        node_id="REQ-1",
+        dynamic_context="<requirement_focus/>",
+        test_files=[],
+        test_type="Unit",
+        node_tests=[],
+        run_tests_budget=TDD_RUN_TESTS_BUDGET,
+    )
+
+    check(
+        f"the prompt publishes the enforced budget ({TDD_RUN_TESTS_BUDGET})",
+        f"budget of {TDD_RUN_TESTS_BUDGET} calls" in prompt,
+        "prompt text must be derived from TDD_RUN_TESTS_BUDGET",
+    )
+    check(
+        "the prompt no longer hardcodes a different number",
+        "budget of 10 calls" not in prompt,
+        "found the stale hardcoded '10 calls'",
+    )
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -487,6 +526,7 @@ def main() -> int:
     check_guard_reads_the_real_validation_format()
     check_timeout_output_is_classified_as_failure()
     check_interface_contract_keeps_its_load_bearing_text()
+    check_published_budget_matches_the_enforced_one()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0

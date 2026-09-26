@@ -205,6 +205,7 @@ class TestDrivenDeveloper:
             test_type=test_type,
             node_tests=current_node_tests,
             previous_failure_summary=previous_failure_summary,
+            run_tests_budget=run_tests_budget,
         )
         await self._log(f"skill-permitted: {', '.join(selected_skill_names) or 'none'}", node_id=node_id)
         await self._log("Invoking TDD implementation.", node_id=node_id)

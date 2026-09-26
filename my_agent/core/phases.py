@@ -502,6 +502,12 @@ class WorkflowPhaseRunner:
                     "Exit Code: 1\n"
                     "STDERR:\n"
                     f"run_tests budget exhausted for {selected_type}: {used}/{TDD_RUN_TESTS_BUDGET}.\n"
+                    # 只报状态的话，模型会把它当成一次普通失败，于是接着改、接着试 ——
+                    # 实测那次本地 run 里它收到 6 次这条回执仍不停手，盲改了 40 多分钟。
+                    # 所以这里必须**说清后果和下一步**，而不是只报一句数字。
+                    f"The `{selected_type}` layer is over for this node: no further run_tests is available.\n"
+                    "Do not edit files in an attempt to keep verifying - you cannot verify any more.\n"
+                    "Return your final answer now.\n"
                 )
             usage_by_type[selected_type] = used + 1
             await self._log(
