@@ -1,0 +1,87 @@
+{
+  "REQ-1-1-1-e2e-register-account": {
+    "test_id": "REQ-1-1-1-e2e-register-account",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-registration-page",
+      "REQ-1-1-1-UI-registration-form-hook",
+      "REQ-1-1-1-UI-signin-page",
+      "REQ-1-1-1-UI-app-shell",
+      "REQ-1-1-1-UI-session-provider",
+      "REQ-1-1-1-API-auth-client",
+      "REQ-1-1-1-API-auth-routes"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/registration.e2e.spec.js",
+    "passed": null,
+    "first_line": "import { expect, test } from '@playwright/test';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-integration-auth-persistence": {
+    "test_id": "REQ-1-1-1-integration-auth-persistence",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-DB-auth-schema",
+      "REQ-1-1-1-DB-auth-seed",
+      "REQ-1-1-1-FUNC-auth-service"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/integration/authRegistrationPersistence.test.js",
+    "passed": null,
+    "first_line": "import { createRequire } from 'node:module';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-integration-auth-register-api": {
+    "test_id": "REQ-1-1-1-integration-auth-register-api",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-API-auth-routes",
+      "REQ-1-1-1-API-route-mount",
+      "REQ-1-1-1-FUNC-auth-service",
+      "REQ-1-1-1-DB-auth-seed"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/integration/authRegistrationApi.test.js",
+    "passed": null,
+    "first_line": "import { createRequire } from 'node:module';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-integration-registration-form": {
+    "test_id": "REQ-1-1-1-integration-registration-form",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-registration-page",
+      "REQ-1-1-1-UI-registration-form-hook",
+      "REQ-1-1-1-UI-signin-page"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/integration/registrationForm.test.tsx",
+    "passed": null,
+    "first_line": "import { describe, expect, it, vi, beforeEach } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-unit-auth-api-client": {
+    "test_id": "REQ-1-1-1-unit-auth-api-client",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-API-auth-client"
+    ],
+    "type": "Unit",
+    "file_path": "frontend/tests/unit/authApi.test.ts",
+    "passed": null,
+    "first_line": "import { describe, expect, it, vi, beforeEach } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-unit-registration-validation": {
+    "test_id": "REQ-1-1-1-unit-registration-validation",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-FUNC-registration-validation"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/services/registrationValidation.test.js",
+    "passed": null,
+    "first_line": "import { createRequire } from 'node:module';",
+    "scenario_id": null
+  }
+}

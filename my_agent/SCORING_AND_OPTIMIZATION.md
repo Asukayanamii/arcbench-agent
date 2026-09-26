@@ -221,9 +221,27 @@ hackathon 有两个任务（github / sheet，各 100 测试），**预算和时�
   省掉这些往返的模型调用（预读是拼接，不花模型 token）
 - 注意 `agents/runtime/stage_policy.py` 已经在拦"重复读"和"重叠区间读"，可以再收紧
 
-### 4.7 省钱：把压缩阈值调到真实窗口
+### 4.7 省钱：把压缩阈值调到真实窗口（✅ 默认值已改）
 
-`app/config/__init__.py` 的 `LLM_CONTEXT_WINDOW` **默认 64000**，压缩线 = 窗口 × `COMPACT_AT`(0.8)。
+`app/config/__init__.py` 的 `LLM_CONTEXT_WINDOW` **默认已从 64000 改成 1000000**
+（= 当前提交模型 deepseek 系在网关上的真实窗口）。**平台不下发 `LLM_*`**，所以这个默认值
+就是平台实际用的那个 —— 原先的 64k 让压缩线落在 51.2K，而实测 input 到过 93K，
+压缩被过早、反复触发。现在压缩线是 800K。
+
+副作用有界：`summary_max_tokens` 是 `min(window × 5%, 8000)`，被 8000 兜住（3200 → 8000）。
+
+⚠️ **但有一个尚未处理的副作用**：`summary_input_chars` = `window × 0.6 / OTHER_PER_TOKEN`，
+随窗口线性放大 —— 1M 窗口下是 **2,000,000 字符（≈66 万 token）**。也就是说**压缩次数少了，
+但每次压缩的摘要器输入上限放大了 15 倍**，而摘要输出被 8000 兜住。
+喂 66 万 token 去产 ≤8000 token 的摘要，性价比很差。
+**建议给摘要器输入加一个与窗口无关的绝对上限**（例如 20 万字符 ≈ 6.6 万 token 就足够），
+不要让它跟着窗口一起涨。在那之前，大窗口下的压缩虽然更少、但单次更贵。
+
+**换模型时要跟着改这个默认值** —— 真正的风险是撞 provider 超窗。
+
+原分析（保留作背景）：
+
+`app/config/__init__.py` 的 `LLM_CONTEXT_WINDOW` 原为默认 64000，压缩线 = 窗口 × `COMPACT_AT`(0.8)。
 平台那条 run 里出现过：
 
 ```
@@ -382,7 +400,7 @@ backend/src/database/init_db.js
       —— 由 `current_interface_contract` 的条件发射实现，`check_interface_contract_is_not_duplicated` 守住
 - [x] 接口清单瘦身（**实测 21.9%，不是原先估的 43%** —— 见 §4.4 的更正）
       —— 只裁 callers/callees/test_focus，`responsibility`/`specification` 全留
-- [ ] `LLM_CONTEXT_WINDOW` 按真实窗口设置
+- [x] `LLM_CONTEXT_WINDOW` 按真实窗口设置（默认 64000 → 1000000，见 §4.7）
 - [ ] 设计产物加字数上限
 - [x] 把阶段硬约束写进提示词（避免试错往返）
 - [x] 路径写法归一（同一个文件不再被读 4–6 遍）

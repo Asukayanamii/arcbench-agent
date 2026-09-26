@@ -95,12 +95,17 @@ LLM_STREAM_CHUNK_TIMEOUT: int | None = (
 
 
 # ---- 上下文自动压缩 ----
-# 窗口这个数只能由用户给：provider 一般不报（DeepSeek 的 /v1/models 只有 id/owned_by），
+# 窗口这个数只能由配置给：provider 一般不报（DeepSeek 的 /v1/models 只有 id/owned_by），
 # 我们也学不来 Pi 那种"生成式模型目录"（没有构建步骤，base_url 可指向任意兼容端点）。
-# 默认取保守的 64k——.env.example 里的 deepseek-chat 正好是 64K；换大窗口模型请显式调大，
 # 启动日志会写明实际用的是哪个值、来自哪里。
+#
+# 默认按**当前提交模型的真实窗口**填：网关上的 deepseek 系是 1M，而平台不下发 LLM_*，
+# 所以这个默认值就是平台实际会用的那个（见 issue #11）。
+# 原先的默认 64k 让压缩线落在 51.2K，而实测 input 到过 93K —— 压缩被过早、反复触发，
+# 每次都是纯抬 b、不改行为：一次摘要调用 + 压缩后前缀缓存失效 + 重写中段视图。
+# 填大了的退化方向是"少省 token"；真正的风险是撞 provider 超窗，所以**换模型时要跟着改**。
 _RAW_WINDOW = os.getenv("LLM_CONTEXT_WINDOW", "").strip()
-LLM_CONTEXT_WINDOW = _int_or(_RAW_WINDOW, 64_000)
+LLM_CONTEXT_WINDOW = _int_or(_RAW_WINDOW, 1_000_000)
 CONTEXT_WINDOW_SOURCE = ".env" if _RAW_WINDOW else "默认值（未配置 LLM_CONTEXT_WINDOW）"
 
 # 关掉就完全回到没有压缩时的行为。

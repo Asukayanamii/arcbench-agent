@@ -52,6 +52,10 @@ _gittest/
 .arc/
 *.log
 
+# 例外：归档到 run-logs/ 的运行日志是要入库的（给队友参考）。
+# 上面的 *.log 是挡散落在项目根的那些临时日志，别把归档一起挡掉。
+!run-logs/**/*.log
+
 # Platform run logs, kept local only. They are large (3-4 MB each) and the
 # findings drawn from them live in commit messages and HANDOVER.md instead.
 new log.txt
