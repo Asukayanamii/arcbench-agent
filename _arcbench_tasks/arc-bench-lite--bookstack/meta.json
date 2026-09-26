@@ -1,0 +1,13 @@
+{
+  "id": "arc-bench-lite--bookstack",
+  "display_id": "TASK-001",
+  "title": "BookStack Knowledge Base System",
+  "category": "web",
+  "test_runner": "playwright",
+  "total_tests": 34,
+  "module_count": 34,
+  "assets_base_url": "http://arc-bench.com/api/requirements/arc-bench-lite--bookstack/assets?catalog=competition",
+  "references_base_url": "http://arc-bench.com/api/requirements/arc-bench-lite--bookstack/references?catalog=competition",
+  "downloaded_test_files": 35,
+  "yaml_bytes": 38919
+}

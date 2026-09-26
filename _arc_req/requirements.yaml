@@ -1,0 +1,20 @@
+id: REQ-1
+name: Counter Shell
+description: A minimal web application shell used as a smoke task for the compile pipeline.
+children:
+  - id: REQ-1.1
+    name: Landing heading
+    description: >-
+      The landing page of the application shows a heading so that a first-time
+      visitor can tell the application rendered successfully.
+    scenarios:
+      - id: REQ-1.1-S1
+        name: Landing page shows the heading
+        steps:
+          - keyword: GIVEN
+            content: the application backend is running and the frontend build is served
+          - keyword: WHEN
+            content: the user opens the application root URL
+          - keyword: THEN
+            content: a heading element is visible on the page
+    dependencies: []

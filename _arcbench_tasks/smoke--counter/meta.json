@@ -1,0 +1,13 @@
+{
+  "id": "smoke--counter",
+  "display_id": "TASK-015",
+  "title": "ARC Counter Smoke Test",
+  "category": "web",
+  "test_runner": "playwright",
+  "total_tests": 1,
+  "module_count": 1,
+  "assets_base_url": "http://arc-bench.com/api/requirements/smoke--counter/assets?catalog=competition",
+  "references_base_url": "http://arc-bench.com/api/requirements/smoke--counter/references?catalog=competition",
+  "downloaded_test_files": 1,
+  "yaml_bytes": 1222
+}

@@ -1,0 +1,21 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.env
+.idea/
+.vscode/
+*.log
+.pytest_cache/
+data/
+.commandcode
+.my_agent/
+LESSONS.md
+
+# ARC 编译产物：这些是运行出来的东西，不进仓库。
+# 编译输出目录（main.py -o 的目标）一般也落在仓库旁边，用下面的通配兜住。
+.arc/
+docker-output/
+arc-output/

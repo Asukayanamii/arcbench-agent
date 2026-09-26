@@ -1,0 +1,25 @@
+# ARC-Bench submission dependencies.
+#
+# Entrypoint: main.py (the platform runs `python main.py <requirements> -o <output>`),
+# so everything the compile path imports must be installable from this file alone.
+# Versions are pinned to the set that my-agent's engine is verified against.
+
+# --- Stage engine: my-agent's LangGraph runtime (graph, tools, model client, retry) ---
+langgraph==1.2.11
+langgraph-checkpoint-sqlite==3.1.1
+langchain-core==1.6.3
+langchain-openai==1.6.2
+aiosqlite==0.22.1
+pydantic==2.13.5
+python-dotenv==1.2.3
+pyyaml==6.0.3
+tzdata==2026.4
+
+# --- ARC harness: stage CLI, traceability I/O, visual reference analysis ---
+colorama
+openai
+
+# --- my-agent's chat/SSE server. Not used by the compile entrypoint, but it is part of
+#     this project and is documented in README.md, so its dependencies stay installed. ---
+fastapi==0.141.1
+uvicorn==0.52.4

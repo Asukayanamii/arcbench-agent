@@ -1,0 +1,13 @@
+{
+  "id": "smoke-evolution--counter",
+  "display_id": "TASK-017",
+  "title": "ARC Counter Evolution Smoke Test",
+  "category": "web",
+  "test_runner": "playwright",
+  "total_tests": 2,
+  "module_count": 2,
+  "assets_base_url": "http://arc-bench.com/api/requirements/smoke-evolution--counter/assets?catalog=competition",
+  "references_base_url": "http://arc-bench.com/api/requirements/smoke-evolution--counter/references?catalog=competition",
+  "downloaded_test_files": 2,
+  "yaml_bytes": 1763
+}

@@ -1,0 +1,8 @@
+{
+  "name": "arcbench-official-harness",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "id": "hackathon--sheet",
+  "display_id": "TASK-012",
+  "title": "Core Requirements for an Online Spreadsheet Data Workspace",
+  "category": "web",
+  "test_runner": "playwright",
+  "total_tests": 100,
+  "module_count": 24,
+  "assets_base_url": "http://arc-bench.com/api/requirements/hackathon--sheet/assets?catalog=competition",
+  "references_base_url": "http://arc-bench.com/api/requirements/hackathon--sheet/references?catalog=competition",
+  "downloaded_test_files": 0,
+  "yaml_bytes": 202240
+}

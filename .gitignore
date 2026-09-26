@@ -1,0 +1,46 @@
+# ---------------------------------------------------------------------------
+# Preserved metadata of the upstream my_agent clone.
+# The clone's .git was moved here so this repo can track my_agent/ as plain
+# files. Kept on disk for reference; not part of this repository.
+# To restore the clone:  move .my_agent_upstream_git back to my_agent/.git
+# ---------------------------------------------------------------------------
+.my_agent_upstream_git/
+
+# Command Code's own workspace config (regenerated automatically)
+.commandcode/
+
+# ---------------------------------------------------------------------------
+# Python
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# ---------------------------------------------------------------------------
+# Node
+# ---------------------------------------------------------------------------
+node_modules/
+
+# ---------------------------------------------------------------------------
+# Build artifacts - reproducible from the tree, so not tracked
+# ---------------------------------------------------------------------------
+*.zip
+dist/
+build/
+work/
+
+# ---------------------------------------------------------------------------
+# ARC runtime state and logs
+# ---------------------------------------------------------------------------
+.arc/
+*.log
+new log.txt
+
+# ---------------------------------------------------------------------------
+# Local secrets - .env.example stays tracked, a real .env never does
+# ---------------------------------------------------------------------------
+.env
+.env.local

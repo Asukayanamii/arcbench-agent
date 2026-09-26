@@ -1,0 +1,13 @@
+{
+  "id": "hackathon--github",
+  "display_id": "TASK-011",
+  "title": "GitHub Collaboration Platform Core Requirements",
+  "category": "web",
+  "test_runner": "playwright",
+  "total_tests": 100,
+  "module_count": 47,
+  "assets_base_url": "http://arc-bench.com/api/requirements/hackathon--github/assets?catalog=competition",
+  "references_base_url": "http://arc-bench.com/api/requirements/hackathon--github/references?catalog=competition",
+  "downloaded_test_files": 0,
+  "yaml_bytes": 292270
+}

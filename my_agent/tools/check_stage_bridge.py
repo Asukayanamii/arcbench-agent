@@ -1,0 +1,279 @@
+"""Pre-flight checks for the ARC stage bridge.
+
+Three invariants that only fail with a *real* model (the mock never exercised them, so
+the first platform run was where they surfaced):
+
+1. **The skill selector and the skill reader must use the same root.** The selector
+   resolved skills under the package's `skills/`, while `read_file` resolved them under
+   my-agent's `SKILLS_DIR` (`~/.my_agent/skills`). A stage was told
+   "skill-permitted: leaf-full-design" and then got
+   "技能文件不存在：/skills/leaf-full-design/SKILL.md" - the tuned guidance never
+   reached the model.
+
+2. **`read_file`'s `offset` must mean "lines to skip" (0-based), matching the discipline
+   accounting in `agents/runtime/stage_policy.py`** (ported from the upstream
+   `StageDisciplineMiddleware`, which defaults `offset` to 0). When the two disagreed, a
+   legitimate continuation read after the first page was rejected as an overlap:
+   `Error: ARC stage discipline: Repeated read blocked: ...`
+
+3. **A failing `run_tests` must unlock the paths the stage already wrote.** Failure has to
+   be read from the tool's *text* (`Exit Code: 1`), exactly as upstream's
+   `_tool_result_failed` does - these tools never raise. Judging by exception alone made
+   the documented unlock unreachable: one write to a path locked it for the rest of the
+   stage, so an agent that generated a broken test file could not repair it. That
+   deadlocked 133 tool calls in a single platform run (REQ-1.1: 98, REQ-1.2: 35).
+
+Run before packaging:
+
+    python tools/check_stage_bridge.py
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO))
+
+# Simulate the runner container, where my-agent's own skill library does not exist,
+# so a wrong root cannot be masked by a stray directory on a dev machine.
+os.environ.setdefault("SKILLS_DIR", str(REPO.parent / "_no_such_skills_dir"))
+
+from langchain_core.tools import StructuredTool  # noqa: E402
+
+from agents.runtime import stage_policy, workspace_tools  # noqa: E402
+from agents.skills import selection  # noqa: E402
+from app.agent.runtime import current_workspace  # noqa: E402
+
+failures: list[str] = []
+
+
+def check(label: str, ok: bool, detail: str = "") -> None:
+    print(("PASS  " if ok else "FAIL  ") + label + (f"  ({detail})" if detail else ""))
+    if not ok:
+        failures.append(label)
+
+
+def _read(path: str, **kwargs: object) -> str:
+    async def run() -> str:
+        token = current_workspace.set(REPO)
+        try:
+            return await workspace_tools.read_file.ainvoke({"file_path": path, **kwargs})
+        finally:
+            current_workspace.reset(token)
+
+    return asyncio.run(run())
+
+
+def check_skill_roots() -> None:
+    print("--- skill selector vs skill reader ---")
+    selector_root = (REPO / "skills").resolve()
+    reader_root = workspace_tools._skills_root()
+    print(f"selector root : {selector_root}")
+    print(f"reader root   : {reader_root}")
+
+    check("reader root matches the selector root",
+          reader_root is not None and reader_root.resolve() == selector_root,
+          f"{reader_root} != {selector_root}")
+    if reader_root is None or reader_root.resolve() != selector_root:
+        return
+
+    shipped = sorted(p.parent.name for p in selector_root.glob("*/SKILL.md"))
+    print(f"skills on disk: {shipped}")
+    check("skills are shipped", len(shipped) >= 5, f"found {len(shipped)}")
+    check("selector accepts every shipped skill",
+          set(selection.available_skill_names(shipped)) == set(shipped))
+
+    for name in shipped:
+        try:
+            body = _read(f"/skills/{name}/SKILL.md")
+        except Exception as exc:  # noqa: BLE001 - the failure text is the assertion
+            check(f"read /skills/{name}/SKILL.md", False, f"{type(exc).__name__}: {exc}")
+            continue
+        check(f"read /skills/{name}/SKILL.md", "---" in body and len(body) > 200, f"{len(body)} chars")
+
+
+def check_pagination() -> None:
+    print()
+    print("--- read_file pagination vs stage discipline ---")
+
+    probe = REPO / "docs" / "_pagination_probe.txt"
+    probe.parent.mkdir(parents=True, exist_ok=True)
+    probe.write_text("\n".join(f"line {i}" for i in range(1, 301)) + "\n", encoding="utf-8")
+    rel = "docs/_pagination_probe.txt"
+    discipline = stage_policy.StageDiscipline(stage="implementation")
+
+    try:
+        first = _read(rel)
+        check("page 1 reports lines 1-100", "显示 1-100" in first, first.splitlines()[0])
+        check("page 1 advertises the continuation offset", "offset=100" in first)
+
+        args1 = {"file_path": "/workspace/" + rel}
+        check("page 1 passes discipline", discipline.check(workspace_tools.READ_TOOL_NAME, args1) is None)
+        discipline.record(workspace_tools.READ_TOOL_NAME, args1, ok=True, content=first)
+
+        args2 = {"file_path": "/workspace/" + rel, "offset": 100, "limit": 100}
+        blocked = discipline.check(workspace_tools.READ_TOOL_NAME, args2)
+        check("continuation at offset=100 is allowed", blocked is None, blocked or "")
+
+        second = _read(rel, offset=100, limit=100)
+        check("page 2 reports lines 101-200", "显示 101-200" in second, second.splitlines()[0])
+        check("page 2 does not repeat page 1", "line 100" not in second and "line 101" in second)
+
+        discipline.record(workspace_tools.READ_TOOL_NAME, args2, ok=True, content=second)
+        args3 = {"file_path": "/workspace/" + rel, "offset": 50, "limit": 10}
+        check("a genuinely overlapping re-read is still blocked",
+              discipline.check(workspace_tools.READ_TOOL_NAME, args3) is not None)
+    finally:
+        probe.unlink(missing_ok=True)
+
+
+def check_stage_limits_are_published() -> None:
+    """Every hard limit the discipline enforces must be stated in the stage prompt.
+
+    The interface-design caps (max skeleton files, max lines per write) used to live only in
+    the blocking branches of `stage_policy`. A real run showed the model write a 158-line file,
+    get rejected for exceeding the undocumented cap, then write it again -- one full round-trip
+    wasted, and that round-trip resends the whole stage history.
+    """
+
+    print()
+    print("--- stage limits are published to the model ---")
+
+    from agents.runtime import factory
+
+    for stage in ("interface_design", "test_generation", "implementation"):
+        text = stage_policy.render_stage_limits(stage)
+        check(f"{stage}: renders a limits block", bool(text.strip()), text[:60])
+
+    design = stage_policy.render_stage_limits("interface_design")
+    check("design caps mention the max skeleton files",
+          str(stage_policy.MAX_DESIGN_WRITES) in design)
+    check("design caps mention the max lines per write",
+          str(stage_policy.MAX_SKELETON_LINES) in design)
+
+    for stage in ("interface_design", "test_generation", "implementation"):
+        assembled = factory._with_response_shape(
+            "BASE PROMPT",
+            response_format=None,
+            skills=None,
+            permitted_skill_names=None,
+            stage=stage,
+        )
+        check(f"{stage}: limits reach the assembled system prompt",
+              "### Stage Limits (enforced)" in assembled and "BASE PROMPT" in assembled)
+
+
+def check_path_keys_are_normalised() -> None:
+    """The same file written two ways must share one cache key.
+
+    A real run showed `init_db.js` read six times because the model alternates between
+    `/workspace/backend/src/database/init_db.js` and `backend/src/database/init_db.js`.
+    Keyed separately, the read cache never matched and every repeat cost a full
+    model round-trip (which resends the whole stage history).
+    """
+
+    print()
+    print("--- path keys collapse to one spelling ---")
+
+    pairs = [
+        ("/workspace/backend/src/app.js", "backend/src/app.js"),
+        ("/workspace/frontend/src/App.tsx", "./frontend/src/App.tsx"),
+        ("/workspace/package.json", "package.json"),
+        ("backend\\src\\app.js", "/workspace/backend/src/app.js"),
+    ]
+    for left, right in pairs:
+        a = stage_policy._discipline_path({"file_path": left})
+        b = stage_policy._discipline_path({"file_path": right})
+        check(f"{left!r} == {right!r}", a == b, f"{a} vs {b}")
+
+    # And the discipline must actually refuse the second spelling as a repeat.
+    probe = REPO / "docs" / "_path_key_probe.txt"
+    probe.parent.mkdir(parents=True, exist_ok=True)
+    probe.write_text("\n".join(f"line {i}" for i in range(1, 60)) + "\n", encoding="utf-8")
+    try:
+        discipline = stage_policy.StageDiscipline(stage="implementation")
+        first = {"file_path": "/workspace/docs/_path_key_probe.txt"}
+        check("first read passes", discipline.check(workspace_tools.READ_TOOL_NAME, first) is None)
+        discipline.record(workspace_tools.READ_TOOL_NAME, first, ok=True, content="x")
+
+        second = {"file_path": "docs/_path_key_probe.txt"}
+        blocked = discipline.check(workspace_tools.READ_TOOL_NAME, second)
+        check("re-reading via the other spelling is blocked", blocked is not None,
+              blocked or "not blocked")
+    finally:
+        probe.unlink(missing_ok=True)
+
+
+def check_guard_unlocks_after_a_failing_validation() -> None:
+    """A failing `run_tests` must unlock the paths this stage already wrote.
+
+    Regression: the port replaced upstream's content-based `_tool_result_failed`
+    with an exception-based flag. `run_tests`/`run_build` report failure in their
+    *text* (`Exit Code: 1`) and never raise, so the unlock never fired - once a
+    test file was written, the agent could not repair it for the rest of the
+    stage. On the platform that deadlocked 133 tool calls (REQ-1.1: 98,
+    REQ-1.2: 35) and left four unit tests red that the agent had already
+    diagnosed.
+    """
+
+    print()
+    print("--- stage discipline unlocks after a failing validation ---")
+
+    async def fake_run_tests(test_type: str | None = None, test_files: list[str] | None = None) -> str:
+        return "Runner: Vitest\nExit Code: 1\nSTDERR:\nFAIL tests/authSchema.test.js\n"
+
+    async def fake_edit_file(file_path: str, content: str) -> str:
+        return "written"
+
+    async def fake_read_file(file_path: str, offset: int = 0, limit: int = 100) -> str:
+        return "line one\nline two\n"
+
+    discipline = stage_policy.StageDiscipline(stage="implementation")
+    tools = {
+        tool.name: tool
+        for tool in stage_policy.guard_tools(
+            [
+                StructuredTool.from_function(coroutine=fake_run_tests, name="run_tests", description="run tests"),
+                StructuredTool.from_function(coroutine=fake_edit_file, name="edit_file", description="write"),
+                StructuredTool.from_function(coroutine=fake_read_file, name="read_file", description="read"),
+            ],
+            discipline,
+        )
+    }
+
+    target = "backend/tests/authSchema.test.js"
+
+    async def run() -> tuple[str, str, str, str]:
+        first = await tools["edit_file"].ainvoke({"file_path": target, "content": "require('vitest')"})
+        failure = await tools["run_tests"].ainvoke({})
+        repair = await tools["edit_file"].ainvoke({"file_path": target, "content": "import { it } from 'vitest'"})
+        reread = await tools["read_file"].ainvoke({"file_path": target})
+        return first, failure, repair, reread
+
+    first, failure, repair, reread = asyncio.run(run())
+
+    check("first write passes", not first.startswith(stage_policy.BLOCKED_PREFIX), first[:60])
+    check("run_tests reports Exit Code: 1", "Exit Code: 1" in failure, failure[:60])
+    check("the repair write is allowed after that failure",
+          not repair.startswith(stage_policy.BLOCKED_PREFIX), repair[:120])
+    check("re-reading the repaired file is allowed",
+          not reread.startswith(stage_policy.BLOCKED_PREFIX), reread[:120])
+
+
+def main() -> int:
+    check_skill_roots()
+    check_pagination()
+    check_path_keys_are_normalised()
+    check_stage_limits_are_published()
+    check_guard_unlocks_after_a_failing_validation()
+    print()
+    print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
