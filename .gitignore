@@ -33,6 +33,16 @@ build/
 work/
 
 # ---------------------------------------------------------------------------
+# Scratch workspaces created by the local _test_*.py runs.
+# These are throwaway; several of them are themselves git repos, so they must
+# never enter the index as embedded repositories.
+# ---------------------------------------------------------------------------
+_stall_test/
+_stream_test/
+_arc_test_out/
+_gittest/
+
+# ---------------------------------------------------------------------------
 # ARC runtime state and logs
 # ---------------------------------------------------------------------------
 .arc/
