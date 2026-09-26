@@ -288,6 +288,41 @@ class ContextPipeline:
             return {}
         return parsed if isinstance(parsed, dict) else {}
 
+    # `<interfaces>` 是本节点**自己的实现契约** —— agent 要照着它写代码。所以只裁「对实现
+    # 无用」的字段（callers / callees / test_focus 这些列表），`responsibility` 与
+    # `specification` **原样保留**：那两项是这份 JSON 的大头，也正是实现所依赖的内容，
+    # 截断它们会丢细节伤通过率，而通过率是评分主导项
+    # （SCORING_AND_OPTIMIZATION.md 自己也写「任何为了省钱而降低正确率的取舍都不划算」）。
+    # 别的节点的接口走 `_get_existing_interface_cards`，那里才用 180/220 那套上限。
+    CONTRACT_LIST_LIMIT = 3
+    CONTRACT_LIST_ITEM_LIMIT = 80
+    CONTRACT_TEST_FOCUS_LIMIT = 4
+    CONTRACT_TEST_FOCUS_ITEM_LIMIT = 120
+
+    def _interface_contract_view(self, interfaces: Any) -> list[dict[str, Any]]:
+        """把节点自己的接口清单投影成契约视图：承重字段全留，只裁列表类噪音。"""
+
+        view: list[dict[str, Any]] = []
+        for iface in interfaces or []:
+            if not isinstance(iface, dict):
+                continue
+            item = dict(iface)
+            content = self._decode_interface_content(iface)
+            if content:
+                trimmed = dict(content)
+                limits = (
+                    ("callers", self.CONTRACT_LIST_LIMIT, self.CONTRACT_LIST_ITEM_LIMIT),
+                    ("callees", self.CONTRACT_LIST_LIMIT, self.CONTRACT_LIST_ITEM_LIMIT),
+                    ("test_focus", self.CONTRACT_TEST_FOCUS_LIMIT, self.CONTRACT_TEST_FOCUS_ITEM_LIMIT),
+                )
+                for key, limit, item_limit in limits:
+                    value = content.get(key)
+                    if isinstance(value, list):
+                        trimmed[key] = self._limit_string_list(value, limit=limit, item_limit=item_limit)
+                item["content"] = trimmed
+            view.append(item)
+        return view
+
     def _get_source_file_cards(self, node_id: str, max_files: int | None = None) -> str:
         store = self._store()
         if store is None:
@@ -376,7 +411,10 @@ class ContextPipeline:
         interfaces = session.get("interfaces")
         if not interfaces:
             return ""
-        return "<interfaces>\n" + self._compact_json(interfaces) + "\n</interfaces>"
+        view = self._interface_contract_view(interfaces)
+        if not view:
+            return ""
+        return "<interfaces>\n" + self._compact_json(view) + "\n</interfaces>"
 
     def _get_resume_context(self, node_id: str) -> str:
         session = self._load_node_session(node_id)
@@ -396,6 +434,16 @@ class ContextPipeline:
             for item in (current_req.get("dependencies") or [])
             if str(item or "").strip()
         }
+        # 本节点自己的接口已经在 `<interfaces>` 里**全量**给出（见 `_interface_contract_view`），
+        # 这里再列一遍等于同一份数据发两遍。只跳过 id 确实对得上的：追溯表与 node session 是
+        # 两份独立存储，两者不一致时宁可多发一点，也不能把接口弄丢。
+        own_ids = {
+            str(item.get("interface_id", "") or "").strip()
+            for item in (self._load_node_session(node_id).get("interfaces") or [])
+            if isinstance(item, dict)
+        }
+        own_ids.discard("")
+
         cards: list[dict[str, Any]] = []
         for iface in store.list_interfaces():
             req_ids = [
@@ -407,6 +455,8 @@ class ContextPipeline:
                 continue
             relation = ""
             if node_id in req_ids:
+                if str(iface.get("interface_id", "") or "").strip() in own_ids:
+                    continue
                 relation = "current"
             elif parent_id and parent_id in req_ids:
                 relation = "parent"
@@ -442,9 +492,12 @@ class ContextPipeline:
         interfaces = session.get("interfaces") or []
         if not interfaces:
             return ""
+        view = self._interface_contract_view(interfaces)
+        if not view:
+            return ""
         return (
             "<current_interface_contract>\n"
-            + self._compact_json(interfaces)
+            + self._compact_json(view)
             + "\n</current_interface_contract>"
         )
 
