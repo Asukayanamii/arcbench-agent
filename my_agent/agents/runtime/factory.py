@@ -24,8 +24,10 @@ from langchain_core.tools import BaseTool, StructuredTool
 from pydantic import BaseModel
 
 from agents.runtime.arc_agent import ArcStageAgent
+from agents.runtime.extra_tools import build_extra_tools, render_extra_tools
 from agents.runtime.stage_policy import StageDiscipline, guard_tools, render_stage_limits
 from agents.runtime.workspace_tools import FILE_TOOLS
+from app.agent.tools.todo import TODO_TOOL_NAMES
 
 
 def build_stage_agent(
@@ -52,7 +54,13 @@ def build_stage_agent(
 
     discipline = StageDiscipline(stage=stage)
     stage_tools = _coerce_tools(tools or [])
-    all_tools = guard_tools([*FILE_TOOLS, *stage_tools], discipline)
+    extra_tools = build_extra_tools(stage, read_tools=FILE_TOOLS, workspace_root=workspace_root)
+    injected_extra = [tool for tool in extra_tools if tool.name in TODO_TOOL_NAMES]
+    plain_extra = [tool for tool in extra_tools if tool.name not in TODO_TOOL_NAMES]
+    all_tools = [
+        *guard_tools([*FILE_TOOLS, *stage_tools, *plain_extra], discipline),
+        *injected_extra,
+    ]
 
     return ArcStageAgent(
         name=name,
@@ -99,6 +107,9 @@ def _with_response_shape(
     limits = render_stage_limits(stage)
     if limits:
         blocks.append(limits)
+    extra_limits = render_extra_tools(stage)
+    if extra_limits:
+        blocks.append(extra_limits)
 
     if response_format is not None and isinstance(response_format, type) and issubclass(
         response_format, BaseModel

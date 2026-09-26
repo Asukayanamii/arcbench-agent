@@ -70,6 +70,9 @@ class AgentState(MessagesState):
     usage_anchor: dict | None
     """{tokens, upto}：上次请求 provider 实报的 input tokens + 那时覆盖到第几条消息。"""
 
+    todo_list: list[dict]
+    """模型按需维护的待办清单；不自动拼进 system prompt。"""
+
 
 def build_graph(
     checkpointer: BaseCheckpointSaver,

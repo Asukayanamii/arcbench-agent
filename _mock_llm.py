@@ -36,6 +36,20 @@ def _decide(messages: list[dict], tool_names: list[str]) -> tuple[str, list[dict
     joined = "\n".join(_text_of(m) for m in messages)
     already_called_tool = any(m.get("role") == "tool" for m in messages)
 
+    if "Implementation probe." in joined and "add_todo" in tool_names:
+        if not already_called_tool:
+            return "", [
+                {
+                    "id": "call_add_todo_1",
+                    "type": "function",
+                    "function": {
+                        "name": "add_todo",
+                        "arguments": json.dumps({"task_desc": "mock implementation task"}),
+                    },
+                }
+            ]
+        return "IMPLEMENTATION_COMPLETE", []
+
     if "InterfaceDesigner Role" in joined:
         if not already_called_tool and "read_file" in tool_names:
             return "", [

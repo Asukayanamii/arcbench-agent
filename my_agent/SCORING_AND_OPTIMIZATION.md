@@ -413,6 +413,25 @@ backend/src/database/init_db.js
 - [ ] 收紧 `run_tests` 输出长度
 - [x] 给 `ArcStageAgent` 加 `astream_events`（长阶段调用能看见进度了）
 
+### 4.16 Issue #6：todo 与只读 subagent 的成本测量
+
+Issue #6 的新增工具只接入 `implementation`。工具 schema 与阶段提示词都用
+`tiktoken` 的 `cl100k_base` 做了同一份 requirements、同一轮数的静态对照；这是
+不调用外部模型的可复现实验，避免把本地 mock 的固定响应误报成真实 API 价格：
+
+| implementation 工具面 | `token_count`（schema 代理） | `token_cost_usd` |
+| --- | ---: | ---: |
+| 原文件工具面（6 个） | 1,864 | N/A（未调用计费 API） |
+| 加入 subagent + todo 四件套（11 个） | 2,294 | N/A（未调用计费 API） |
+| 增量 | **+430** | N/A |
+
+阶段限制之后公布新增工具的文案从 142 增至 271 tokens（+129）。本仓库的
+`_mock_llm.py` 是 SSE 流且不返回 provider `usage_metadata`，所以 mock E2E 的
+`token_count=0`、`token_cost_usd=0` 只能作为功能回归，不能当作费用结论。接入真实
+网关后，用 run 记录的 `token_count` 与 `token_cost_usd` 复跑同一 requirements、同一
+轮数，并把两行真实值补到此表；若 subagent 实际未被调用，工具 schema 的 +430
+tokens 是其可见上限，todo 的拉取式清单不会改变 system 前缀。
+
 **每次改完**
 - [ ] `python tools/check_stage_bridge.py`（守住技能根与分页语义）
 - [ ] `python arc_main.py doctor`
