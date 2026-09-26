@@ -50,6 +50,7 @@ os.environ.setdefault("SKILLS_DIR", str(REPO.parent / "_no_such_skills_dir"))
 
 from langchain_core.tools import StructuredTool  # noqa: E402
 
+from agents.context.pipeline import context_pipeline  # noqa: E402
 from agents.runtime import stage_policy, workspace_tools  # noqa: E402
 from agents.skills import selection  # noqa: E402
 from app.agent.runtime import current_workspace  # noqa: E402
@@ -385,6 +386,56 @@ def check_guard_reads_the_real_validation_format() -> None:
     )
 
 
+def check_interface_contract_keeps_its_load_bearing_text() -> None:
+    """`<interfaces>` 只许裁列表类噪音，`responsibility` / `specification` 必须全留。
+
+    这份清单是本节点**自己的实现契约** —— agent 要照着它写代码。它同时是这份 JSON 的
+    体积大头，所以「省上下文」的直觉会去截断它；但通过率是评分主导项，丢实现细节的代价
+    比省下的 token 贵得多。这条检查就是钉住这个取舍，防止以后有人照搬别的节点的
+    180/220 上限把它一起砍了。
+    """
+
+    print()
+    print("--- interface contract keeps its load-bearing text ---")
+
+    long_responsibility = "职责说明。" * 800      # 远大于 180
+    long_specification = "实现细节。" * 800       # 远大于 220
+    view = context_pipeline._interface_contract_view(
+        [
+            {
+                "interface_id": "IF-1",
+                "type": "API",
+                "content": {
+                    "responsibility": long_responsibility,
+                    "specification": long_specification,
+                    "callers": [f"caller-{i}" for i in range(10)],
+                    "callees": [f"callee-{i}" for i in range(10)],
+                    "test_focus": [f"focus-{i}" for i in range(10)],
+                },
+            }
+        ]
+    )
+
+    check("the view keeps the interface", len(view) == 1, f"{len(view)} entries")
+    if not view:
+        return
+    content = view[0].get("content") or {}
+    check("responsibility survives untruncated",
+          content.get("responsibility") == long_responsibility,
+          f"{len(str(content.get('responsibility', '')))} chars")
+    check("specification survives untruncated",
+          content.get("specification") == long_specification,
+          f"{len(str(content.get('specification', '')))} chars")
+    check("callers are capped", len(content.get("callers") or []) == 3,
+          f"{len(content.get('callers') or [])} kept")
+    check("callees are capped", len(content.get("callees") or []) == 3,
+          f"{len(content.get('callees') or [])} kept")
+    check("test_focus is capped", len(content.get("test_focus") or []) == 4,
+          f"{len(content.get('test_focus') or [])} kept")
+    check("the identity fields are untouched",
+          view[0].get("interface_id") == "IF-1" and view[0].get("type") == "API")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -393,6 +444,7 @@ def main() -> int:
     check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()
     check_guard_reads_the_real_validation_format()
+    check_interface_contract_keeps_its_load_bearing_text()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0

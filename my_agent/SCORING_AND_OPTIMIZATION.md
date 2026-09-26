@@ -151,7 +151,7 @@ hackathon 有两个任务（github / sheet，各 100 测试），**预算和时�
 - `r < 1`：已在线内，**全力提通过率**，省钱收益很小
 - `r > 1`：先压开销（惩罚区斜率翻倍），但**不能以掉通过率为代价**
 
-### 4.3 省钱：去掉提示词里的重复（已定位，收益明确）
+### 4.3 省钱：去掉提示词里的重复（✅ 已完成）
 
 每个阶段的上下文里，**同一份接口清单出现了两次**：
 
@@ -161,18 +161,44 @@ hackathon 有两个任务（github / sheet，各 100 测试），**预算和时�
 | `<current_interface_contract>` | `ContextPipeline.get_interface_contract_context`（阶段 agent 单独再传一次） | 11.2 KB |
 
 实测（10 个接口的节点、TestDrivenDeveloper 阶段）：**总上下文 26.7 KB，其中 11.2 KB 是纯重复**，
-两份的字段值**逐字段完全相同**。**去掉一份就省掉约 42% 的上下文**。
+两份的字段值**逐字段完全相同**。
 
-- 受影响的是 **TestGenerator** 与 **TestDrivenDeveloper**（InterfaceDesigner 只拿一次，没有重复）
-- 而 TestDrivenDeveloper 恰恰是调用最密的：每层最多 5 次 × 3 层 = 每节点最多 15 次
-- 改法：`get_interface_contract_context` 要么不再单独传，要么让它返回空，
-  由 `<interfaces>` 承担；两边只留一处
+**已修复**：`test_generator.py` 与 `test_driven_developer.py` 现在只在
+`"<interfaces>" not in dynamic_context` 时才发 `### Current Interface Contract`；
+`tools/check_stage_bridge.py::check_interface_contract_is_not_duplicated` 守着它。
+**约 42% 已拿到。**
 
-### 4.4 省钱：接口清单也做截断
+### 4.4 省钱：接口清单瘦身（✅ 已完成，但幅度只有文档原先估的一半）
 
-`_get_source_file_cards` / `_get_existing_interface_cards` 已经做了截断
-（responsibility 180 字符、specification 220 字符），但**上面那两个块没有**，
-它们 `json.dumps` 整份接口对象。实测全量 11.1 KB、截断成卡片视图 6.3 KB —— **再省 43%**。
+`_get_source_file_cards` / `_get_existing_interface_cards` 早就做了截断
+（responsibility 180 字符、specification 220 字符），而 `<interfaces>` 与
+`<current_interface_contract>` 是整份 `json.dumps`，没有截断。
+
+> ⚠️ **这里原先的建议是错的，别照做。**
+> 原文说「截断成卡片视图可再省 43%」—— 那个数字是把 **180/220 的文本上限整套套上去**测的，
+> 而这份 JSON 的体积大头正是 `responsibility` / `specification`，也就是 **agent 要照着写代码的
+> 实现契约**。`<interfaces>` 是本节点自己的契约，`<existing_interfaces>` 才是别的节点的。
+> 截断前者会丢实现细节 → 伤通过率，而**通过率是评分主导项**（见本文档开头）。
+
+**实际做法**（`pipeline.py::_interface_contract_view`）：
+
+- 只裁**对实现无用**的列表类字段：`callers` / `callees`（各 3 条 × 80 字符）、`test_focus`（4 条 × 120 字符）
+- `responsibility` / `specification` **原样保留**
+- 顺带：`<existing_interfaces>` 不再重复列出本节点自己的接口（那些已在 `<interfaces>` 里全量给出）；
+  只跳过 `interface_id` 确实对得上的，避免两份存储不一致时丢接口
+
+**实测降幅（合成数据：10 个接口、散文式 responsibility/specification、各 10 个 callers/callees）**：
+
+| | 字节 |
+| --- | --- |
+| 全量 `_compact_json` | 35,856 |
+| 契约视图 | 28,006 |
+| **节省** | **7,850（21.9%）** |
+
+**21.9%，不是 43%。** 差的那一半就是实现契约本身，那部分不该省。
+
+回归检查：`tools/check_stage_bridge.py::check_interface_contract_keeps_its_load_bearing_text`
+—— 钉住「`responsibility` / `specification` 不被截断」，防止以后有人照搬 180/220 把它一起砍了。
 
 ### 4.5 省钱：约束设计产物的篇幅
 
@@ -292,6 +318,28 @@ backend/src/database/init_db.js
 已改为先把 `/workspace` 虚拟根前缀和 `./` 去掉再归一，
 `tools/check_stage_bridge.py` 里加了 4 组写法等价断言 + 1 条「换个写法重读必须被拦」。
 
+### 4.14 提分：阶段纪律的失败判定必须读工具正文（已修）
+
+守卫（`agents/runtime/stage_policy.py`）用「本次调用成没成」决定要不要解锁已写过的文件。
+搬到 my-agent 时判定被换成了**看有没有抛异常**，但 `run_tests` / `run_build` 失败时是
+**返回** `Exit Code: 1` 的正文、**从不抛异常** —— 于是 `_validation_failed` 永远是假、
+`_path_unlocked` 永远为假：**一个文件在本阶段被写过一次，就再也改不回、也读不回**，
+守卫消息承诺的那个解锁成了不可达的死代码。
+
+平台实测代价：**死锁 133 次工具调用**（REQ-1.1 被拦 98 次、REQ-1.2 被拦 35 次）。
+四个单测红点全来自这条路径 —— agent 已经明确诊断出自己生成的测试文件要由
+`require('vitest')` 改成 ESM `import`，却改不动它，只能反复重试到超时。
+
+**为什么 demo 能过、ticket 过不了**：锁是**每轮 stage run 一份**。demo 被锁的是源码
+（不在该轮测试的关键路径上，可拖到下一轮解锁），ticket 被锁的**就是测试文件本身**
+（绕不过，且读也被锁）。
+
+已按上游 `StageDisciplineMiddleware._tool_result_failed` 的语义改成读正文。
+**注意这条依赖 `Exit Code:` 这个正文格式**，所以另加了两道独立见证：
+`check_guard_unlocks_after_a_failing_validation`（行为）与
+`check_guard_reads_the_real_validation_format`（生产者仍发出该标记 + 守卫与独立解析器结论一致），
+防止格式改名后守卫**静默**停止解锁。
+
 ---
 
 ## 5. 行动清单
@@ -304,12 +352,15 @@ backend/src/database/init_db.js
       `python tools/build_submission_zip.py` 打包（不要用 `Compress-Archive`）
 
 **第一批改动（低风险、收益明确）**
-- [ ] 去掉 `<interfaces>` / `<current_interface_contract>` 的重复（省约 42% 上下文）
-- [ ] 接口清单改用截断卡片视图（再省 43%）
+- [x] 去掉 `<interfaces>` / `<current_interface_contract>` 的重复（省约 42% 上下文）
+      —— 由 `current_interface_contract` 的条件发射实现，`check_interface_contract_is_not_duplicated` 守住
+- [x] 接口清单瘦身（**实测 21.9%，不是原先估的 43%** —— 见 §4.4 的更正）
+      —— 只裁 callers/callees/test_focus，`responsibility`/`specification` 全留
 - [ ] `LLM_CONTEXT_WINDOW` 按真实窗口设置
 - [ ] 设计产物加字数上限
 - [x] 把阶段硬约束写进提示词（避免试错往返）
 - [x] 路径写法归一（同一个文件不再被读 4–6 遍）
+- [x] 阶段纪律的失败判定读工具正文（否则解锁永不触发，见 §4.14）
 
 **第二批（需要验证再上）**
 - [ ] 预读接口契约里点名的文件，减少工具往返
