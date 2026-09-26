@@ -1,0 +1,207 @@
+{
+  "REQ-1-1-2-API-AUTH-CLIENT": {
+    "interface_id": "REQ-1-1-2-API-AUTH-CLIENT",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "API",
+    "content": "{\"interface_id\": \"REQ-1-1-2-API-AUTH-CLIENT\", \"req_id\": \"REQ-1-1-2\", \"type\": \"API\", \"name\": \"authApi (sign-in, session restore, sign-out client)\", \"file_path\": \"frontend/src/api/authApi.ts\", \"first_line\": \"1\", \"responsibility\": \"Frontend HTTP boundary for account access: submits credentials, restores the durable session, and revokes it; normalizes failures into the generic sign-in result the page renders.\", \"specification\": \"Uses the shared axios instance from ./index (baseURL '/api', withCredentials true, global error interceptor). `signIn({identifier, password}): Promise<{ok, account?, error?}>` POSTs /auth/login and returns the account on 200; on any error it returns { ok: false, error } where the message falls back to the generic 'Invalid credentials' (the API's 401 body is `{ error }` and the interceptor copies it onto error.message). `fetchSession(): Promise<AuthAccount|null>` GETs /auth/session and returns `data.account ?? null`. `logout()` POSTs /auth/logout. AuthAccount = { id, username, email, emailVerified }.\", \"inputs\": [\"SignInInput { identifier: string; password: string }\", \"session cookie managed by the browser (withCredentials)\"], \"outputs\": [\"SignInResult { ok: boolean; account?: AuthAccount; error?: string }\", \"AuthAccount | null from fetchSession\", \"void from logout\"], \"callers\": [\"REQ-1-1-2-UI-SIGNIN-FORM\", \"REQ-1-1-2-UI-SESSION-PROVIDER (fetchSession, logout)\"], \"callees\": [\"REQ-1-1-2-API-AUTH-ROUTES (/api/auth/login, /api/auth/session, /api/auth/logout)\", \"frontend/src/api/index.ts interceptors\"], \"test_focus\": [\"Successful sign-in resolves ok with the account payload\", \"401 response resolves ok:false with the generic message and no account\", \"fetchSession resolves null for an anonymous browser\"]}",
+    "file_path": "frontend/src/api/authApi.ts",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "REQ-1-1-2-UI-SIGNIN-FORM",
+      "REQ-1-1-2-UI-SESSION-PROVIDER (fetchSession, logout)"
+    ],
+    "callees": [
+      "REQ-1-1-2-API-AUTH-ROUTES (/api/auth/login, /api/auth/session, /api/auth/logout)",
+      "frontend/src/api/index.ts interceptors"
+    ]
+  },
+  "REQ-1-1-2-API-AUTH-ROUTES": {
+    "interface_id": "REQ-1-1-2-API-AUTH-ROUTES",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "API",
+    "content": "{\"interface_id\": \"REQ-1-1-2-API-AUTH-ROUTES\", \"req_id\": \"REQ-1-1-2\", \"type\": \"API\", \"name\": \"Auth HTTP routes (login, session, logout)\", \"file_path\": \"backend/src/routes/auth_routes.js\", \"first_line\": \"1\", \"responsibility\": \"Thin HTTP boundary mounted at /api/auth: shapes sign-in/session/logout requests and responses and owns the session cookie transport.\", \"specification\": \"POST /api/auth/login -> 200 { account } with Set-Cookie `session_token=<token>; Path=/; HttpOnly; SameSite=Lax; Max-Age=<SESSION_MAX_AGE_SECONDS>` on success, or 401 { error: 'Invalid credentials' } for unknown identifier, wrong password, or unavailable account (identical body for all three). GET /api/auth/session -> 200 { account: Account|null } resolved from the cookie token via the service (refresh-safe restore). POST /api/auth/logout -> 200 { ok: true } and clears the cookie. Never returns password material or a differentiated failure reason. When protected domain routes need the request's current account they must use the shared resolver instead of re-parsing cookies; keep the cookie name sourced from the shared session-context constant so client, route, and service stay consistent.\", \"inputs\": [\"JSON body { identifier, password } for login\", \"Cookie header containing session_token\"], \"outputs\": [\"200 { account } + session cookie\", \"401 { error: 'Invalid credentials' }\", \"200 { account: Account|null }\", \"200 { ok: true } + cleared cookie\"], \"callers\": [\"backend/src/index.js (app.use('/api/auth', createAuthRouter()))\", \"REQ-1-1-2-API-AUTH-CLIENT\"], \"callees\": [\"REQ-1-1-2-FUNC-AUTH-SERVICE (signIn, getSessionAccount, signOut)\", \"REQ-1-1-2-FUNC-SESSION-CONTEXT (shared cookie/session constant)\"], \"test_focus\": [\"Valid credentials return 200 with the account and a session cookie\", \"Each of unknown identifier, wrong password, and unavailable account returns the identical 401 body 'Invalid credentials'\", \"GET /session with the issued cookie returns the account; without it returns null\", \"No session cookie is set on a failed login\"]}",
+    "file_path": "backend/src/routes/auth_routes.js",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "backend/src/index.js (app.use('/api/auth', createAuthRouter()))",
+      "REQ-1-1-2-API-AUTH-CLIENT"
+    ],
+    "callees": [
+      "REQ-1-1-2-FUNC-AUTH-SERVICE (signIn, getSessionAccount, signOut)",
+      "REQ-1-1-2-FUNC-SESSION-CONTEXT (shared cookie/session constant)"
+    ]
+  },
+  "REQ-1-1-2-DB-SEED-ACCOUNTS": {
+    "interface_id": "REQ-1-1-2-DB-SEED-ACCOUNTS",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "DB",
+    "content": "{\"interface_id\": \"REQ-1-1-2-DB-SEED-ACCOUNTS\", \"req_id\": \"REQ-1-1-2\", \"type\": \"DB\", \"name\": \"Deterministic pre-existing account seed (alice-dev)\", \"file_path\": \"backend/src/database/seed_db.js\", \"first_line\": \"1\", \"responsibility\": \"Provides the GIVEN pre-existing, verified, available account as ordinary product data reachable through the normal startup path, not as a test-only fixture.\", \"specification\": \"seedDatabase() runs `INSERT OR IGNORE` for the deterministic account { username: 'alice-dev', email: 'alice.dev@example.test', password: 'Valid-password-123!' } with a fixed salt and `email_verified = 1`, inside a transaction, so repeated runs (app start, test DB setup, E2E preparation) change nothing. It is invoked by backend/src/index.js after initializeDatabase() so the account exists for a fresh runtime database and is sign-in capable through the real UI -> API -> service -> DB path. Seed data stays limited to genuine product preconditions; no scenario-time credentials or evaluator-specific fixtures may be added.\", \"inputs\": [\"withTransaction / run from backend/src/database/db_runtime.js\", \"hashPassword from backend/src/services/password.js\"], \"outputs\": [\"one alice-dev account row (idempotent) usable for sign-in\"], \"callers\": [\"backend/src/index.js startup (start())\", \"backend/src/database/test_harness.js for isolated test DB preparation\"], \"callees\": [\"REQ-1-1-2-DB-SESSION-SCHEMA\"], \"test_focus\": [\"After startup, signing in with alice-dev / alice.dev@example.test and Valid-password-123! succeeds\", \"Running the seed twice does not create duplicate accounts\", \"The seeded account is verified and available so it is not rejected as unavailable\"]}",
+    "file_path": "backend/src/database/seed_db.js",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "backend/src/index.js startup (start())",
+      "backend/src/database/test_harness.js for isolated test DB preparation"
+    ],
+    "callees": [
+      "REQ-1-1-2-DB-SESSION-SCHEMA"
+    ]
+  },
+  "REQ-1-1-2-DB-SESSION-SCHEMA": {
+    "interface_id": "REQ-1-1-2-DB-SESSION-SCHEMA",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "DB",
+    "content": "{\"interface_id\": \"REQ-1-1-2-DB-SESSION-SCHEMA\", \"req_id\": \"REQ-1-1-2\", \"type\": \"DB\", \"name\": \"accounts / sessions schema (session identifier, account identifier, active status)\", \"file_path\": \"backend/src/database/init_db.js\", \"first_line\": \"1\", \"responsibility\": \"Owns the durable schema behind sign-in: the account credential/availability record and the session record persisted after successful authentication.\", \"specification\": \"Created idempotently (CREATE TABLE IF NOT EXISTS) during `initializeDatabase()` on normal app startup. `accounts(id PK, username UNIQUE, email UNIQUE, password_hash, email_verified, ...)` holds the credential digest used by sign-in; add an explicit availability flag (e.g. `suspended INTEGER NOT NULL DEFAULT 0`) so an unavailable account can be rejected — and must be rejected with the same generic 'Invalid credentials' as an unknown one. `sessions(token TEXT PK, account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE, created_at, expires_at INTEGER NOT NULL)` is the session record with a unique session identifier, the owning account identifier, and an active status (e.g. `active INTEGER NOT NULL DEFAULT 1` plus index on account_id) consumed by getSessionAccount. Schema evolution must stay centralized in this file and be idempotent for already-created database files (guarded ADD COLUMN or equivalent migration), never duplicated in feature folders.\", \"inputs\": [\"startup call initializeDatabase() from backend/src/index.js\", \"environment database file selection (ARC_DB_FILE / DATABASE_FILE)\"], \"outputs\": [\"accounts and sessions tables with indexes ready for sign-in/session queries\"], \"callers\": [\"REQ-1-1-2-FUNC-AUTH-SERVICE\", \"REQ-1-1-2-DB-SEED-ACCOUNTS\", \"backend/src/database/test_harness.js\"], \"callees\": [], \"test_focus\": [\"initializeDatabase is idempotent across repeated startups with an existing DB file\", \"sessions rows carry token, account_id, active flag, and a future expires_at after sign-in\", \"accounts uniqueness on username and email is enforced\"]}",
+    "file_path": "backend/src/database/init_db.js",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "REQ-1-1-2-FUNC-AUTH-SERVICE",
+      "REQ-1-1-2-DB-SEED-ACCOUNTS",
+      "backend/src/database/test_harness.js"
+    ],
+    "callees": []
+  },
+  "REQ-1-1-2-FUNC-AUTH-SERVICE": {
+    "interface_id": "REQ-1-1-2-FUNC-AUTH-SERVICE",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "FUNC",
+    "content": "{\"interface_id\": \"REQ-1-1-2-FUNC-AUTH-SERVICE\", \"req_id\": \"REQ-1-1-2\", \"type\": \"FUNC\", \"name\": \"authService.signIn / getSessionAccount / signOut\", \"file_path\": \"backend/src/services/auth_service.js\", \"first_line\": \"1\", \"responsibility\": \"Owns credential lookup, availability check, uniform generic failure reporting, and durable session persistence (unique identifier + account identifier + active status).\", \"specification\": \"`signIn({identifier, password})`: normalizes the identifier (trim + lowercase) and looks it up against `accounts.username` or `accounts.email`; returns { ok: false, message: 'Invalid credentials' } for a missing identifier/password, an unknown account, a wrong password (constant-time-ish comparison through verifyPassword), and an unavailable/suspended account — the same message text is the only failure surface, so existence and which credential failed are never disclosed. On success it creates a cryptographically random session token (unique session identifier), inserts `{ token, account_id, active status, expires_at = now + SESSION_MAX_AGE_SECONDS }`, and returns { ok: true, account, token }. `getSessionAccount(token)` joins sessions->accounts, rejects unknown, inactive, or expired sessions (deleting the expired row) and resolves the public account shape { id, username, email, emailVerified }, which is the single source for 'the current user' on protected requests. `signOut(token)` deletes the session row. `SIGN_IN_MESSAGES.invalidCredentials` must literally equal 'Invalid credentials'.\", \"inputs\": [\"{ identifier: string, password: string }\", \"session token string from the request cookie\"], \"outputs\": [\"{ ok: true, account, token } | { ok: false, message }\", \"public account { id, username, email, emailVerified } | null\", \"{ ok: true } from signOut\"], \"callers\": [\"REQ-1-1-2-API-AUTH-ROUTES\", \"REQ-1-1-2-FUNC-SESSION-CONTEXT\"], \"callees\": [\"REQ-1-1-2-DB-SESSION-SCHEMA (accounts, sessions tables)\", \"backend/src/services/password.js (verifyPassword/hashPassword)\"], \"test_focus\": [\"Successful sign-in with the seeded alice-dev account persists a session row and returns the account\", \"Unknown identifier, wrong password, and suspended account all return the identical 'Invalid credentials' message and write no session row\", \"getSessionAccount returns the account for a live token and null for expired/inactive/unknown tokens\"]}",
+    "file_path": "backend/src/services/auth_service.js",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "REQ-1-1-2-API-AUTH-ROUTES",
+      "REQ-1-1-2-FUNC-SESSION-CONTEXT"
+    ],
+    "callees": [
+      "REQ-1-1-2-DB-SESSION-SCHEMA (accounts, sessions tables)",
+      "backend/src/services/password.js (verifyPassword/hashPassword)"
+    ]
+  },
+  "REQ-1-1-2-FUNC-SESSION-CONTEXT": {
+    "interface_id": "REQ-1-1-2-FUNC-SESSION-CONTEXT",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "FUNC",
+    "content": "{\"interface_id\": \"REQ-1-1-2-FUNC-SESSION-CONTEXT\", \"req_id\": \"REQ-1-1-2\", \"type\": \"FUNC\", \"name\": \"sessionContext (current user resolution for protected requests)\", \"file_path\": \"backend/src/services/session_context.js\", \"first_line\": \"1\", \"responsibility\": \"Single backend boundary that answers 'who is the current user for this request?' so protected organization/repository/work-item routes derive the current user from the login session instead of trusting request input.\", \"specification\": \"Exports SESSION_COOKIE_NAME ('session_token'), readSessionToken(req) (parses the raw Cookie header), resolveCurrentAccount(req) -> Promise<public account|null> delegating to authService.getSessionAccount (no duplication of session validation), and requireSession(req,res,next) which attaches req.currentAccount and responds 401 { error: 'Authentication required' } when no valid session exists, failing closed on missing/invalid/expired/inactive sessions. Protected feature routers must mount requireSession (or call resolveCurrentAccount) rather than re-implementing cookie or session parsing.\", \"inputs\": [\"Express request with Cookie header\"], \"outputs\": [\"public account for the request, or null\", \"401 { error: 'Authentication required' } from requireSession\", \"req.currentAccount attachment\"], \"callers\": [\"protected organization/repository/work-item routers added by later requirements\", \"REQ-1-1-2-API-AUTH-ROUTES for the shared cookie name\"], \"callees\": [\"REQ-1-1-2-FUNC-AUTH-SERVICE (getSessionAccount)\"], \"test_focus\": [\"Returns the signed-in account for a request carrying a valid session cookie\", \"Returns null / 401 for absent, unknown, or expired cookies\", \"Never leaks session internals into response bodies\"]}",
+    "file_path": "backend/src/services/session_context.js",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "protected organization/repository/work-item routers added by later requirements",
+      "REQ-1-1-2-API-AUTH-ROUTES for the shared cookie name"
+    ],
+    "callees": [
+      "REQ-1-1-2-FUNC-AUTH-SERVICE (getSessionAccount)"
+    ]
+  },
+  "REQ-1-1-2-UI-ACCOUNT-MENU": {
+    "interface_id": "REQ-1-1-2-UI-ACCOUNT-MENU",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-2-UI-ACCOUNT-MENU\", \"req_id\": \"REQ-1-1-2\", \"type\": \"UI\", \"name\": \"AccountMenu (upper-right account chrome)\", \"file_path\": \"frontend/src/features/auth/AccountMenu.tsx\", \"first_line\": \"1\", \"responsibility\": \"Shared upper-right account menu that represents the frontend session: shows the current username from global session state and offers sign-out; renders nothing when unauthenticated.\", \"specification\": \"Reads useAuthSession(); returns null when `account` is null so unauthenticated pages (and failed sign-ins) show no account menu. When authenticated it renders a button labelled with `account.username` (data-testid 'account-menu-button', aria-haspopup='menu', aria-expanded reflecting open state) that toggles a panel (data-testid 'account-menu', role='menu') containing the account email and a 'Sign out' menu item calling the shared signOut then optional onSignedOut callback. No local user copy: all data comes from the shared session so it stays correct after refresh.\", \"inputs\": [\"props: { onSignedOut?: () => void }\", \"shared session state via useAuthSession()\"], \"outputs\": [\"username button and menu panel when authenticated\", \"null render when anonymous\", \"sign-out action on the shared session\"], \"callers\": [\"REQ-1-1-2-UI-WORKSPACE-PAGE header\", \"any authenticated shell/header surface added by later requirements\"], \"callees\": [\"REQ-1-1-2-UI-SESSION-PROVIDER (useAuthSession)\"], \"test_focus\": [\"Renders the username after successful sign-in and after a session restore\", \"Renders nothing for an unauthenticated visitor or after a failed sign-in\", \"'Sign out' action returns the app to unauthenticated chrome\"]}",
+    "file_path": "frontend/src/features/auth/AccountMenu.tsx",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "REQ-1-1-2-UI-WORKSPACE-PAGE header",
+      "any authenticated shell/header surface added by later requirements"
+    ],
+    "callees": [
+      "REQ-1-1-2-UI-SESSION-PROVIDER (useAuthSession)"
+    ]
+  },
+  "REQ-1-1-2-UI-PROTECTED-ROUTE": {
+    "interface_id": "REQ-1-1-2-UI-PROTECTED-ROUTE",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-2-UI-PROTECTED-ROUTE\", \"req_id\": \"REQ-1-1-2\", \"type\": \"UI\", \"name\": \"ProtectedRoute (authorization gate)\", \"file_path\": \"frontend/src/features/auth/ProtectedRoute.tsx\", \"first_line\": \"1\", \"responsibility\": \"Guards authenticated pages such as the workspace: waits for the session restore, then either renders the protected children or redirects an unauthenticated visitor to the account-access page.\", \"specification\": \"Reads `{ account, status }` from useAuthSession(). While status === 'loading' it renders a loading placeholder (data-testid 'session-loading') so a valid cookie session is not mistaken for unauthenticated during restore. When status === 'ready' and account is null it renders <Navigate replace to='/login' state={{ from: location.pathname }} />. Otherwise it renders the children. Consuming the shared context (not a local flag) is what makes the previously accessible protected page still show the signed-in user after refresh/reopen, while a failed sign-in still requires authentication.\", \"inputs\": [\"props: { children: ReactNode }\", \"shared session state via useAuthSession()\"], \"outputs\": [\"children when authenticated\", \"loading placeholder during restore\", \"redirect to /login when unauthenticated\"], \"callers\": [\"frontend/src/App.tsx route element for '/workspace'\"], \"callees\": [\"REQ-1-1-2-UI-SESSION-PROVIDER (useAuthSession)\", \"react-router-dom Navigate/useLocation\"], \"test_focus\": [\"Anonymous access to a protected path redirects to the sign-in page\", \"Directly reopening the protected path with a restored session renders the page and the current username\", \"Loading state is shown until the restore settles\"]}",
+    "file_path": "frontend/src/features/auth/ProtectedRoute.tsx",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "frontend/src/App.tsx route element for '/workspace'"
+    ],
+    "callees": [
+      "REQ-1-1-2-UI-SESSION-PROVIDER (useAuthSession)",
+      "react-router-dom Navigate/useLocation"
+    ]
+  },
+  "REQ-1-1-2-UI-SESSION-PROVIDER": {
+    "interface_id": "REQ-1-1-2-UI-SESSION-PROVIDER",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-2-UI-SESSION-PROVIDER\", \"req_id\": \"REQ-1-1-2\", \"type\": \"UI\", \"name\": \"SessionProvider / useAuthSession (global authenticated state)\", \"file_path\": \"frontend/src/features/auth/SessionProvider.tsx\", \"first_line\": \"1\", \"responsibility\": \"Single global source of truth for the current browser session: exposes the current account, a restore status, and the setters/refresh/signOut actions consumed by the account menu, protected routes, home page, and workspace.\", \"specification\": \"Context value `{ account: AuthAccount|null, status: 'loading'|'ready', setAccount, refresh, signOut }`. Mounted once above the route table. On mount it restores the durable session via fetchSession() (GET /api/auth/session) so a signed-in user survives refresh/reopen; `status` stays 'loading' until that first restore settles and becomes 'ready' afterwards, including on restore failure (account null). setAccount replaces the global account immediately after login/registration. signOut revokes the durable session and clears the account even when the revoke call fails. useAuthSession throws outside the provider so no surface keeps page-local user state.\", \"inputs\": [\"children: ReactNode\", \"session restore response from GET /api/auth/session\"], \"outputs\": [\"AuthSessionValue context consumed by all authenticated surfaces\"], \"callers\": [\"frontend/src/App.tsx (provider mount + setAccount after sign-in)\", \"frontend/src/pages/HomePage.tsx\", \"REQ-1-1-2-UI-ACCOUNT-MENU\", \"REQ-1-1-2-UI-PROTECTED-ROUTE\", \"REQ-1-1-2-UI-WORKSPACE-PAGE\"], \"callees\": [\"REQ-1-1-2-API-AUTH-CLIENT (fetchSession, logout)\"], \"test_focus\": [\"status is 'loading' before the restore resolves\", \"account is restored from the session endpoint on mount (reload-safe current user)\", \"signOut clears account and leaves status 'ready'\"]}",
+    "file_path": "frontend/src/features/auth/SessionProvider.tsx",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "frontend/src/App.tsx (provider mount + setAccount after sign-in)",
+      "frontend/src/pages/HomePage.tsx",
+      "REQ-1-1-2-UI-ACCOUNT-MENU",
+      "REQ-1-1-2-UI-PROTECTED-ROUTE",
+      "REQ-1-1-2-UI-WORKSPACE-PAGE"
+    ],
+    "callees": [
+      "REQ-1-1-2-API-AUTH-CLIENT (fetchSession, logout)"
+    ]
+  },
+  "REQ-1-1-2-UI-SIGNIN-FORM": {
+    "interface_id": "REQ-1-1-2-UI-SIGNIN-FORM",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-2-UI-SIGNIN-FORM\", \"req_id\": \"REQ-1-1-2\", \"type\": \"UI\", \"name\": \"SignInPage (account-access sign-in form)\", \"file_path\": \"frontend/src/features/auth/SignInPage.tsx\", \"first_line\": \"1\", \"responsibility\": \"Owned entry surface for sign-in: the 'Username or email', 'Password', and 'Sign in' control group on the account-access page; shows exactly the generic 'Invalid credentials' failure and stays on the page without creating a session when authentication fails.\", \"specification\": \"Controlled form with `identifier` (label 'Username or email', name/id `identifier`) and `password` (label 'Password'), submit button labelled 'Sign in', and the 'Create an account' link to /register. Submit calls the auth client `signIn({identifier, password})`; on failure (`ok:false`) it renders the single generic message via `role=\\\"alert\\\"` (never distinguishing unknown identifier, wrong password, or unavailable account) and does NOT invoke onSignedIn, so no session/account-menu appears. On success it calls `onSignedIn(account)` exactly once, which is the only path that updates global session state and the redirect to the workspace. Includes 'New to the product?' link routing to the registration page.\", \"inputs\": [\"props: { onSignedIn?: (account: AuthAccount) => void }\", \"user input: identifier string (username or email), password string\"], \"outputs\": [\"onSignedIn(AuthAccount) on success\", \"inline alert text 'Invalid credentials' on failure\", \"no navigation and no authenticated chrome on failure\"], \"callers\": [\"frontend/src/App.tsx route element for path '/login' (reused from REQ-1-1-1, wired here to setAccount + navigate('/workspace'))\", \"frontend/src/pages/HomePage.tsx 'Sign in' link to /login\"], \"callees\": [\"REQ-1-1-2-API-AUTH-CLIENT (signIn)\", \"REQ-1-1-2-UI-SESSION-PROVIDER via App.tsx setAccount\", \"react-router-dom Link to /register\"], \"test_focus\": [\"Renders heading 'Sign in' plus both labelled fields and the 'Sign in' button\", \"Successful submit with alice-dev / alice.dev@example.test / Valid-password-123! triggers onSignedIn and no alert\", \"Wrong password, unknown identifier, and unavailable account each render exactly 'Invalid credentials' and never call onSignedIn\"]}",
+    "file_path": "frontend/src/features/auth/SignInPage.tsx",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "frontend/src/App.tsx route element for path '/login' (reused from REQ-1-1-1, wired here to setAccount + navigate('/workspace'))",
+      "frontend/src/pages/HomePage.tsx 'Sign in' link to /login"
+    ],
+    "callees": [
+      "REQ-1-1-2-API-AUTH-CLIENT (signIn)",
+      "REQ-1-1-2-UI-SESSION-PROVIDER via App.tsx setAccount",
+      "react-router-dom Link to /register"
+    ]
+  },
+  "REQ-1-1-2-UI-WORKSPACE-PAGE": {
+    "interface_id": "REQ-1-1-2-UI-WORKSPACE-PAGE",
+    "req_ids": [
+      "REQ-1-1-2"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-2-UI-WORKSPACE-PAGE\", \"req_id\": \"REQ-1-1-2\", \"type\": \"UI\", \"name\": \"WorkspacePage (post sign-in destination)\", \"file_path\": \"frontend/src/features/workspace/WorkspacePage.tsx\", \"first_line\": \"1\", \"responsibility\": \"Thin destination reached after successful authentication: renders the workspace shell, the shared account chrome, and the current signed-in user, and states explicitly that organization/repository/work-item collections are provided by their own features.\", \"specification\": \"Renders a header ('GitHub Workspace') plus <AccountMenu /> and a main region with a heading. Reads useAuthSession(): 'loading' renders a loading state (data-testid 'workspace-loading'); authenticated renders 'Signed in as <username>' (data-testid 'workspace-current-user'); otherwise renders an alert-style message that sign-in is required (defensive only, since the route is gated). Renders no invented organization/repository/work-item rows: the collections section shows an explicit empty/not-yet-loaded state (data-testid 'workspace-collections-empty') and must not be replaced with hardcoded sample data; later features may load the real authorized collections through their own interfaces.\", \"inputs\": [\"props: { title?: string }\", \"shared session state via useAuthSession()\"], \"outputs\": [\"authenticated workspace shell with current username\", \"explicit loading/empty states instead of fake records\"], \"callers\": [\"frontend/src/App.tsx route (wrapped in REQ-1-1-2-UI-PROTECTED-ROUTE)\"], \"callees\": [\"REQ-1-1-2-UI-SESSION-PROVIDER (useAuthSession)\", \"REQ-1-1-2-UI-ACCOUNT-MENU\"], \"test_focus\": [\"After sign-in the workspace shows the account menu with the username\", \"After refresh the same page still shows the signed-in user\", \"No hardcoded organization/repository/work-item rows are rendered\"]}",
+    "file_path": "frontend/src/features/workspace/WorkspacePage.tsx",
+    "first_line": "1",
+    "implemented": true,
+    "callers": [
+      "frontend/src/App.tsx route (wrapped in REQ-1-1-2-UI-PROTECTED-ROUTE)"
+    ],
+    "callees": [
+      "REQ-1-1-2-UI-SESSION-PROVIDER (useAuthSession)",
+      "REQ-1-1-2-UI-ACCOUNT-MENU"
+    ]
+  }
+}

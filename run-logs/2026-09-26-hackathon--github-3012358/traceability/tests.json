@@ -1,0 +1,48 @@
+{
+  "REQ-1-1-1-TEST-E2E-REGISTER-ACCOUNT": {
+    "test_id": "REQ-1-1-1-TEST-E2E-REGISTER-ACCOUNT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-UI-SIGNIN-PAGE",
+      "REQ-1-1-1-UI-SESSION-PROVIDER",
+      "REQ-1-1-1-UI-AUTH-API-CLIENT",
+      "REQ-1-1-1-UI-APP-ROUTING",
+      "REQ-1-1-1-API-AUTH-ROUTES",
+      "REQ-1-1-1-API-APP-MOUNT",
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-DB-ACCOUNTS-SESSIONS"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/auth_register.e2e.spec.js",
+    "passed": true,
+    "first_line": "const { test, expect } = require('@playwright/test');",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-TEST-INTEGRATION-REGISTER-FORM": {
+    "test_id": "REQ-1-1-1-TEST-INTEGRATION-REGISTER-FORM",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-UI-AUTH-API-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/integration/register_page_form.test.tsx",
+    "passed": true,
+    "first_line": "import { describe, expect, it, vi, beforeEach } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-TEST-UNIT-AUTH-SERVICE-REGISTRATION": {
+    "test_id": "REQ-1-1-1-TEST-UNIT-AUTH-SERVICE-REGISTRATION",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-DB-ACCOUNTS-SESSIONS"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/unit/auth_service_register.test.js",
+    "passed": true,
+    "first_line": "import { afterEach, beforeEach, describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "node_id": "REQ-1",
+  "phase_status": {
+    "design": "skipped",
+    "test": "skipped",
+    "implement": "pending"
+  },
+  "requirement_snapshot": {
+    "name": "Identity and Access",
+    "description": "This module defines the “account” and “session” required to access the system. An account is a persistent individual identity storing a username, verified email, and credential status; a session is a record created after successful account sign-in that represents only the current browser login state. Visitors enter the account-access page from “Sign up”, “Sign in”, or “Forgot password” on the home page; signed-in users enter security settings or sign out from the account menu. The account menu is the control in the upper-right corner of the page that displays the current signed-in account, organization list, and sign-out entry. No page, error message, or recovery flow may display a full password. After successful sign-in, the account menu displays the current user, and subsequent organization, repository, issue, and pull-request pages use this session to determine visibility and operation permissions; sign-out, password changes, and recovery must immediately change the session state visible to subsequent requests.",
+    "visual_reference": [],
+    "children_ids": [
+      "REQ-1-1",
+      "REQ-1-2",
+      "REQ-1-3"
+    ],
+    "dependencies": []
+  },
+  "recent_failure_summary": "",
+  "interfaces": [],
+  "materialized_files": [],
+  "test_artifacts": [],
+  "resume_context": {}
+}
