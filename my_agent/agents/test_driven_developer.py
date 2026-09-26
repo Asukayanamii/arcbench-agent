@@ -45,6 +45,7 @@ class TestDrivenDeveloper:
         self._last_run_tests_exit_code: int | None = None
         self._last_verifier_report_text = ""
         self._test_budget_exhausted = False
+        self._test_budget_exhausted_type = ""
         self._current_test_files: list[str] = []
         self._current_test_type = ""
 
@@ -66,6 +67,7 @@ class TestDrivenDeveloper:
         self._last_run_tests_exit_code = None
         self._last_verifier_report_text = ""
         self._test_budget_exhausted = False
+        self._test_budget_exhausted_type = ""
         self._current_test_files = [str(path or "").strip() for path in test_files if str(path or "").strip()]
         self._current_test_type = test_type
         current_node_tests = [item for item in (node_tests or []) if isinstance(item, dict)]
@@ -223,9 +225,19 @@ class TestDrivenDeveloper:
             thread_id=f"{node_id}:IMPLEMENT:TestDrivenDeveloper:{self._current_test_type or 'batch'}",
             label=self.agent_name,
             log_cb=self.log_cb,
+            # 预算一耗尽就中断本次 session。只让 run_tests 拒绝是拦不住的 ——
+            # 模型把那当成一次普通失败，接着改、接着试，实测空转了 18.6 分钟。
+            should_stop=lambda: self._test_budget_exhausted,
         )
         final_text = self._payload_to_final_text(payload)
         if self._test_budget_exhausted and stop_on_test_budget_exhausted:
+            await self._log(
+                "TDD session ended: `run_tests` budget for "
+                f"`{self._test_budget_exhausted_type or self._current_test_type or 'the active layer'}` "
+                "was exhausted, so the session was stopped instead of letting it keep editing unverified files.",
+                status="error",
+                node_id=node_id,
+            )
             return "BUDGET_EXHAUSTED"
         if "IMPLEMENTED" in final_text.upper() and self._last_run_tests_exit_code != 0:
             final_text = (
@@ -234,6 +246,23 @@ class TestDrivenDeveloper:
             )
         await self._log("TDD session completed.", node_id=node_id)
         return final_text
+
+    def note_test_budget_exhausted(self, test_type: str = "") -> None:
+        """由**执行层**回调：本层预算已经用完，本次 session 该结束了。
+
+        为什么必须由外面来点：本类自己那份预算检查（`run_tests` 闭包里的
+        `used >= run_tests_budget`）在真实路径下**从不执行** —— `core/phases.py:600`
+        传的是 `run_tests_budget=None, run_tests_usage=None`。而它读的键是
+        `usage["run_tests"]`，执行器用的却是按测试类型的 `usage_by_type["Unit"]`，
+        结构上也对不上，所以没法靠传参打通。
+
+        所以真正强制的那个（执行器）必须把这个事实回传进来。置位后
+        `ainvoke_stage_agent(should_stop=...)` 会终止本次 session，
+        `run()` 随之返回 `BUDGET_EXHAUSTED`。
+        """
+
+        self._test_budget_exhausted = True
+        self._test_budget_exhausted_type = str(test_type or "")
 
     def get_last_run_tests_result(self) -> str | None:
         return self._last_run_tests_result

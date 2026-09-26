@@ -498,6 +498,11 @@ class WorkflowPhaseRunner:
                     status="error",
                     node_id=node_id,
                 )
+                # 执行器是**真正强制预算的那一个**（agent 自己那份检查在真实路径下不执行，
+                # 见 note_test_budget_exhausted 的说明），所以得由它把这个事实回传，
+                # 否则 agent 的终止谓词永远不会翻转，session 会空转到 recursion_limit。
+                # 实测那次它收到 9 次拒绝仍空转了 18.6 分钟（issue #13）。
+                self.test_driven_developer.note_test_budget_exhausted(selected_type)
                 return (
                     "Exit Code: 1\n"
                     "STDERR:\n"
