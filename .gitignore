@@ -25,9 +25,13 @@ __pycache__/
 node_modules/
 
 # ---------------------------------------------------------------------------
-# Build artifacts - reproducible from the tree, so not tracked
+# Build artifacts.
+# The submission zip IS tracked on purpose: it is the artifact actually handed
+# to the platform, so the exact submitted bytes must stay recoverable from
+# history. Everything else in this section is reproducible from the tree.
 # ---------------------------------------------------------------------------
 *.zip
+!my_agent-arcbench-submission.zip
 dist/
 build/
 work/
