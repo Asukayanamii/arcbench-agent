@@ -37,6 +37,7 @@ Run before packaging:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import time
@@ -780,6 +781,69 @@ def check_test_runners_fail_fast_instead_of_hanging() -> None:
           "partial output was discarded - that is what made the npx hang undiagnosable")
 
 
+def check_install_is_verified_not_assumed() -> None:
+    """「装完了」必须是**校验过**的，不能只看 `returncode == 0`（issue #26）。
+
+    实跑证据：backend 的 `node_modules/.bin` 里最终只有 node-gyp / prebuild-install /
+    rimraf 这些原生模块的构建工具链，**测试与构建工具一个都没有** —— 而 `run_npm_install`
+    打印的是 `NPM install success`，因为它只检查退出码。于是问题一路藏到
+    `run_build` 打出 `'vite' is not recognized` 才暴露，那时 TDD 已经把整层预算耗光。
+
+    这条检查针对 `_missing_declared_dependencies` 做行为验证：它就是要用来在安装后
+    点名「声明了但没装上」的包。
+    """
+
+    print()
+    print("--- the install result is verified, not assumed ---")
+
+    import tempfile  # noqa: PLC0415
+
+    with tempfile.TemporaryDirectory(prefix="arc-install-probe-") as tmp:
+        root = Path(tmp)
+        check("no package.json -> nothing to check",
+              web_handler._missing_declared_dependencies(tmp) == [])
+
+        (root / "package.json").write_text(
+            json.dumps(
+                {
+                    "dependencies": {"react": "^19.0.0"},
+                    "devDependencies": {"vitest": "^3.0.0", "vite": "^7.0.0"},
+                    "optionalDependencies": {"fsevents": "^2.0.0"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        missing = web_handler._missing_declared_dependencies(tmp)
+        check("declared-but-absent packages are all reported",
+              sorted(missing) == ["fsevents", "react", "vite", "vitest"],
+              f"got {sorted(missing)}")
+
+        # 装上一个，它就该从缺失清单里消失。
+        (root / "node_modules" / "vitest").mkdir(parents=True)
+        missing_after = web_handler._missing_declared_dependencies(tmp)
+        check("an installed package drops out of the list",
+              "vitest" not in missing_after and "vite" in missing_after,
+              f"got {sorted(missing_after)}")
+
+        # 作用域包要按两级路径展开，否则永远误报缺失。
+        (root / "node_modules" / "@scope" / "pkg").mkdir(parents=True)
+        (root / "package.json").write_text(
+            json.dumps({"devDependencies": {"@scope/pkg": "1.0.0"}}), encoding="utf-8"
+        )
+        check("a scoped package resolves through its two-level path",
+              web_handler._missing_declared_dependencies(tmp) == [],
+              f"got {web_handler._missing_declared_dependencies(tmp)}")
+
+        # 空目录下 `npm install` 的经典产物：exit 0 + node_modules 只有构建工具链。
+        (root / "package.json").write_text(
+            json.dumps({"devDependencies": {"vite": "^7.0.0"}}), encoding="utf-8"
+        )
+        (root / "node_modules" / "node-gyp").mkdir(parents=True, exist_ok=True)
+        check("exit-0-but-incomplete is exactly what this catches",
+              web_handler._missing_declared_dependencies(tmp) == ["vite"],
+              f"got {web_handler._missing_declared_dependencies(tmp)}")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -795,6 +859,7 @@ def main() -> int:
     check_a_stage_can_stop_its_own_agent_session()
     check_timeouts_are_configurable_and_distinguishable()
     check_test_runners_fail_fast_instead_of_hanging()
+    check_install_is_verified_not_assumed()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0
