@@ -54,7 +54,7 @@ from agents.context.pipeline import context_pipeline  # noqa: E402
 from agents.runtime import stage_policy, workspace_tools  # noqa: E402
 from agents.skills import selection  # noqa: E402
 from app.agent.runtime import current_workspace  # noqa: E402
-from app_type_handler import test_results  # noqa: E402
+from app_type_handler import test_results, web as web_handler  # noqa: E402
 
 failures: list[str] = []
 
@@ -436,6 +436,47 @@ def check_interface_contract_keeps_its_load_bearing_text() -> None:
           view[0].get("interface_id") == "IF-1" and view[0].get("type") == "API")
 
 
+def check_timeout_output_is_classified_as_failure() -> None:
+    """超时也是失败 —— 而且这条必须用**真实生产者**的返回值来断言。
+
+    `_tool_result_failed` 的判据是「含 `Exit Code:` 且不是 `Exit Code: 0`」。
+    `app_type_handler/web.py` 的超时分支原先返回 `Command timed out after 60.0 seconds.`，
+    两条都不满足 → **判为「没失败」→ 解锁不触发**；而超时恰恰是最需要「让我改改再试一次」
+    的那类失败。`test_results.parse_test_results` 同样解析不出退出码。
+
+    实测：那次本地 run 里 34 次 `run_tests` 返回有 5 次如此
+    （`run-logs/2026-09-26-hackathon-github-7e1ba30/debug.log`）。
+
+    这里刻意**不写死字符串**，而是真的调一次 `_execute_web_test_command` 让它超时 ——
+    上一条检查只扫「文件里有没有这个字面量」，而 `web.py` 的非超时分支当然有，
+    所以它扫不出「同一个文件的另一个分支绕过了它」。只有从真实生产者取返回值，
+    格式真的变了才会红。
+    """
+
+    print()
+    print("--- timeout output is classified as failure ---")
+
+    async def probe() -> str:
+        return await web_handler._execute_web_test_command(
+            f'"{sys.executable}" -c "import time; time.sleep(5)"',
+            cwd=str(REPO),
+            timeout=0.5,
+        )
+
+    output = asyncio.run(probe())
+    detail = " ".join(output.split())[:95]
+
+    check("the probe really timed out", "timed out" in output, detail)
+    check(f"timeout output carries `{EXIT_CODE_MARKER}`", EXIT_CODE_MARKER in output, detail)
+    check("guard treats a timeout as failure",
+          stage_policy._tool_result_failed(output), detail)
+    parsed = test_results.parse_test_results(output)["exit_code"]
+    # 注意断言「正」而不是「非零」：解析不出来时 parse_test_results 返回哨兵 -1，
+    # 那也是非零 —— 用 != 0 会让这条在格式坏掉时"蒙对"。要的是真的解析出了退出码。
+    check("parser reads a timeout as a real positive exit code",
+          parsed > 0, f"exit_code={parsed}（-1 表示没解析出来）")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -444,6 +485,7 @@ def main() -> int:
     check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()
     check_guard_reads_the_real_validation_format()
+    check_timeout_output_is_classified_as_failure()
     check_interface_contract_keeps_its_load_bearing_text()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
