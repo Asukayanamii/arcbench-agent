@@ -50,8 +50,10 @@ os.environ.setdefault("SKILLS_DIR", str(REPO.parent / "_no_such_skills_dir"))
 
 from langchain_core.tools import StructuredTool  # noqa: E402
 
+from agents import test_driven_developer  # noqa: E402
 from agents.context.pipeline import context_pipeline  # noqa: E402
 from agents.runtime import stage_policy, workspace_tools  # noqa: E402
+from agents.runtime.contracts import AgentRuntimeContext  # noqa: E402
 from agents.skills import selection  # noqa: E402
 from app.agent.runtime import current_workspace  # noqa: E402
 from app_type_handler import test_results, web as web_handler  # noqa: E402
@@ -565,6 +567,89 @@ def check_clean_survives_readonly_git_objects() -> None:
         check("_rmtree_force removes it", removed, detail)
 
 
+def check_a_stage_can_stop_its_own_agent_session() -> None:
+    """预算耗尽必须能**终止 session**，而不只是让工具拒绝（issue #13）。
+
+    工具层说「不」是拦不住模型的：它会把 ``run_tests budget exhausted`` 当成一次普通失败，
+    接着改、接着试。实测那次它收到 9 次拒绝仍空转了 **18.6 分钟**、写下 **27 个再也无法验证**
+    的文件，最后是人工杀的 —— ``BUDGET_EXHAUSTED`` 和 ``TDD batch`` 都没有出现在日志里，
+    也就是说这一层连判定都没产出。
+
+    这条检查覆盖整条链：谓词能被置位 → runner 真的中断流 → **不回落到 ainvoke**
+    （回落的后果是把整个 agent 重跑一遍，正是我们刚刚决定不要做的事）。
+    最后两条源码断言防止接线被悄悄拆掉。
+    """
+
+    print()
+    print("--- a stage can stop its own agent session ---")
+
+    from agents.runtime import runners  # noqa: PLC0415
+
+    tdd = test_driven_developer.TestDrivenDeveloper()
+    check("a fresh agent has no exhausted budget", not tdd._test_budget_exhausted)
+    tdd.note_test_budget_exhausted("Unit")
+    check("the executor's callback flips it", tdd._test_budget_exhausted)
+    check("it remembers which layer", tdd._test_budget_exhausted_type == "Unit",
+          f"got {tdd._test_budget_exhausted_type!r}")
+
+    class _FakeStreamingAgent:
+        """只会一直吐事件的假 agent，用来观察流是不是被中断。"""
+
+        def __init__(self) -> None:
+            self.events = 0
+            self.ainvoke_called = False
+
+        async def astream_events(self, *_args, **_kwargs):
+            for _ in range(50):
+                self.events += 1
+                yield {"event": "on_tool_start", "name": "run_tests", "data": {"input": {}}}
+
+        async def ainvoke(self, *_args, **_kwargs):
+            self.ainvoke_called = True
+            return {"messages": []}
+
+    async def drive() -> tuple[_FakeStreamingAgent, object]:
+        agent = _FakeStreamingAgent()
+
+        def should_stop() -> bool:
+            return agent.events >= 3
+
+        payload = await runners.ainvoke_stage_agent(
+            agent,
+            message="probe: do not actually run anything",
+            context=AgentRuntimeContext(
+                node_id="REQ-1",
+                phase="IMPLEMENT",
+                app_type="web",
+                workspace_root=str(REPO),
+                requirement_path="",
+            ),
+            thread_id="stop-predicate-probe",
+            label="probe",
+            should_stop=should_stop,
+        )
+        return agent, payload
+
+    agent, payload = asyncio.run(drive())
+
+    check("the stream stopped long before its natural end",
+          agent.events < 50, f"consumed {agent.events}/50 events")
+    check("it did NOT fall back to ainvoke",
+          not agent.ainvoke_called,
+          "falling back would re-run the whole agent - exactly what the stop was for")
+    check("the early stop still returns a usable payload",
+          isinstance(payload, dict) and bool(payload.get("summary")), f"payload={payload!r}")
+
+    tdd_source = (REPO / "agents" / "test_driven_developer.py").read_text(encoding="utf-8", errors="replace")
+    check("the TDD agent wires the predicate into its agent call",
+          "should_stop=lambda: self._test_budget_exhausted" in tdd_source,
+          "the wiring was removed, so nothing would stop the session")
+    phases_source = (REPO / "core" / "phases.py").read_text(encoding="utf-8", errors="replace")
+    check("the executor that enforces the budget reports it back",
+          "note_test_budget_exhausted(selected_type)" in phases_source,
+          "the enforcing side must flip the flag, or the predicate never fires")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -577,6 +662,7 @@ def main() -> int:
     check_interface_contract_keeps_its_load_bearing_text()
     check_published_budget_matches_the_enforced_one()
     check_clean_survives_readonly_git_objects()
+    check_a_stage_can_stop_its_own_agent_session()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0

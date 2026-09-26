@@ -27,7 +27,19 @@ async def ainvoke_stage_agent(
     label: str = "",
     log_cb: LogCallback | None = None,
     stream: bool | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
+    """调用 stage agent 并返回 payload。
+
+    `should_stop` 是给长循环 agent（比如 TDD）留的**外部终止谓词**：流循环每收到一个事件
+    就问一次，为真就中断本次 session。存在的理由是很具体的失败模式 —— 工具层拒绝继续
+    （`run_tests` 预算耗尽）**拦不住模型**，它会把那当成一次普通失败接着改、接着试。
+    实测那次它收到 9 次拒绝仍空转了 18.6 分钟、写下 27 个再也无法验证的文件，最后是我手杀的
+    （issue #13）。工具说「不」不够，得有人把 loop 停掉。
+
+    注意：只有流式路径（默认）会响应这个谓词。`stream=False` 走 `agent.ainvoke`，
+    那是一次不可中断的调用，传进来的 `should_stop` 会被忽略。
+    """
     started_at = time.perf_counter()
     run_label = label or getattr(agent, "name", "") or context.phase or "stage-agent"
     log_to_logger(logger, "AGENT_CALL_START", label=run_label, thread_id=thread_id, body=message)
@@ -47,6 +59,7 @@ async def ainvoke_stage_agent(
             run_label=run_label,
             log_cb=log_cb,
             logger=logger,
+            should_stop=should_stop,
         )
         if stream_payload is not None:
             duration_ms = (time.perf_counter() - started_at) * 1000.0
@@ -190,6 +203,7 @@ async def _try_astream_stage_agent(
     run_label: str,
     log_cb: LogCallback | None,
     logger: Any | None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any] | None:
     if _should_use_sync_stream_v3():
         sync_payload = _try_stream_stage_agent_sync(
@@ -200,6 +214,7 @@ async def _try_astream_stage_agent(
             run_label=run_label,
             log_cb=log_cb,
             logger=logger,
+            should_stop=should_stop,
         )
         if sync_payload is not None:
             return sync_payload
@@ -210,6 +225,7 @@ async def _try_astream_stage_agent(
 
     await _emit_log(log_cb, run_label, "agent stream start.", node_id=context.node_id)
     final_state: dict[str, Any] | None = None
+    stopped = False
     try:
         event_stream = agent.astream_events(
             {"messages": [{"role": "user", "content": message}]},
@@ -220,6 +236,12 @@ async def _try_astream_stage_agent(
         if inspect.isawaitable(event_stream):
             event_stream = await event_stream
         async for event in event_stream:
+            # 谓词在**处理事件之前**问：翻转它的那个事件（工具回执）本身还要照常记录，
+            # 所以下一个事件才真正中断。跳出 async for 会给生成器发 aclose()，
+            # LangGraph 随之取消这次 run。
+            if should_stop is not None and should_stop():
+                stopped = True
+                break
             maybe_state = await _log_stream_event(
                 log_cb,
                 event,
@@ -239,7 +261,21 @@ async def _try_astream_stage_agent(
         log_to_logger(logger, "AGENT_STREAM_FALLBACK", label=run_label, thread_id=thread_id, body=str(exc))
         return None
 
+    if stopped:
+        await _emit_log(
+            log_cb,
+            run_label,
+            "agent stream stopped early: the stage asked for a hard stop, so this session ends here. "
+            "The thread is abandoned rather than resumed, so no half-finished tool batch is carried over.",
+            status="warning",
+            node_id=context.node_id,
+        )
+
     if final_state is None:
+        if stopped:
+            # 刻意**不**回落到 ainvoke：那会把整个 agent 重跑一遍，
+            # 而我们刚刚决定的就是别再跑了。
+            return {"summary": "Agent session stopped early at the caller's request."}
         await _emit_log(
             log_cb,
             run_label,
@@ -262,6 +298,7 @@ def _try_stream_stage_agent_sync(
     run_label: str,
     log_cb: LogCallback | None,
     logger: Any | None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict[str, Any] | None:
     if not hasattr(agent, "stream_events"):
         return None
@@ -281,6 +318,17 @@ def _try_stream_stage_agent_sync(
         final_state: dict[str, Any] | None = None
         seen_message_count = 0
         for stream_name, item in stream.interleave(*stream_names):
+            # 与 _try_astream_stage_agent 同一套终止语义。这条路目前不可达
+            # （_should_use_sync_stream_v3 恒为 False），但参数既然接了就別默默吞掉。
+            if should_stop is not None and should_stop():
+                _emit_log_sync(
+                    log_cb,
+                    run_label,
+                    "agent stream stopped early: the stage asked for a hard stop.",
+                    status="warning",
+                    node_id=context.node_id,
+                )
+                break
             if stream_name == "messages":
                 text = _typed_stream_item_text(item)
                 if text:
