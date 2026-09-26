@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import os
 import shutil
+import stat
 import sys
 import time
 import traceback
@@ -22,6 +23,27 @@ from core.cli import (
 from core.config import set_web_port
 from core.failure_report import write_failure_report
 from core.workflow import ARCWorkflowManager, load_project_metadata
+
+
+def _rmtree_force(path: str) -> None:
+    """删整棵目录，遇到只读文件先清掉只读位。
+
+    Windows 上 git 的 `.git/objects/*` 带 FILE_ATTRIBUTE_READONLY，默认的 `shutil.rmtree`
+    会抛 `PermissionError: [WinError 5]`，让 `--clean` 整个失败 —— 复跑同一个输出目录时必踩。
+    Linux 不受影响（unlink 的权限看父目录是否可写），所以这是本地开发才会遇到的坑。issue #12。
+
+    `onexc` 是 Python 3.12+ 的名字（更早的版本叫 `onerror`，3.12 起被移除）。
+    本包 requirements 钉 3.12+，但本地开发机可能是别的版本，所以两个都兼容。
+    """
+
+    def _force_remove(func, target, _exc_info):
+        os.chmod(target, stat.S_IWRITE)
+        func(target)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_force_remove)
+    else:  # pragma: no cover - 旧解释器
+        shutil.rmtree(path, onerror=lambda f, t, e: _force_remove(f, t, e))
 
 
 @dataclass(slots=True)
@@ -260,7 +282,7 @@ async def cmd_compile(args: argparse.Namespace) -> int:
     
     # Handle --clean
     if args.clean and os.path.exists(output_dir):
-        shutil.rmtree(output_dir)
+        _rmtree_force(output_dir)
     
     try:
         normalized_app_type, resolved_web_port = _resolve_workspace_settings(
