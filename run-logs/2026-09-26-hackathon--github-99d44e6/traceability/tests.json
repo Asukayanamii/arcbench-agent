@@ -1,0 +1,95 @@
+{
+  "REQ-1-1-1-BE-AUTH-ROUTES-INT": {
+    "test_id": "REQ-1-1-1-BE-AUTH-ROUTES-INT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-API-AUTH-ROUTES",
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-DB-SCHEMA",
+      "REQ-1-1-1-DB-SEED-ENTRYPOINT"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/auth/auth_routes_register.test.js",
+    "passed": false,
+    "first_line": "import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-BE-AUTH-SERVICE-UNIT": {
+    "test_id": "REQ-1-1-1-BE-AUTH-SERVICE-UNIT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-DB-SCHEMA",
+      "REQ-1-1-1-DB-SEED-ENTRYPOINT"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/auth/auth_service_registration.test.js",
+    "passed": false,
+    "first_line": "import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-E2E-SCENARIO-1": {
+    "test_id": "REQ-1-1-1-E2E-SCENARIO-1",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-UI-REGISTRATION-FORM-HOOK",
+      "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+      "REQ-1-1-1-UI-APP-ROUTES",
+      "REQ-1-1-1-API-AUTH-ROUTES",
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-DB-SEED-ENTRYPOINT"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/auth-registration-scenario-1.spec.js",
+    "passed": true,
+    "first_line": "const { test, expect } = require('@playwright/test');",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-E2E-SCENARIOS-2-3": {
+    "test_id": "REQ-1-1-1-E2E-SCENARIOS-2-3",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-APP-ROUTES",
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+      "REQ-1-1-1-API-AUTH-ROUTES",
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-DB-SEED-ENTRYPOINT"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/auth-registration-scenarios-2-3.spec.js",
+    "passed": true,
+    "first_line": "const { test, expect } = require('@playwright/test');",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-FE-REGISTRATION-PAGE-INT": {
+    "test_id": "REQ-1-1-1-FE-REGISTRATION-PAGE-INT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-UI-REGISTRATION-FORM-HOOK",
+      "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+      "REQ-1-1-1-API-AUTH-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/registration_page.test.tsx",
+    "passed": false,
+    "first_line": "import { beforeEach, describe, expect, it, vi } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-FE-REGISTRATION-SESSION-INT": {
+    "test_id": "REQ-1-1-1-FE-REGISTRATION-SESSION-INT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-AUTH-SESSION-PROVIDER",
+      "REQ-1-1-1-API-AUTH-CLIENT",
+      "REQ-1-1-1-UI-REGISTRATION-FORM-HOOK"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/registration_session_state.test.tsx",
+    "passed": false,
+    "first_line": "import { beforeEach, describe, expect, it, vi } from 'vitest';",
+    "scenario_id": null
+  }
+}
