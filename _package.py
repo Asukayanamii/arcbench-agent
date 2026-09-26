@@ -41,6 +41,8 @@ DIR_MODE = 0o40775            # directory, rwxrwxr-x
 FILE_ATTR = FILE_MODE << 16
 DIR_ATTR = DIR_MODE << 16
 
+ROOT_DIR = Path(__file__).resolve().parent
+
 
 def should_skip_dir(name: str) -> bool:
     return name in SKIP_DIRS
@@ -66,8 +68,8 @@ def add_entry(archive: zipfile.ZipFile, path: Path, arcname: str, attr: int) -> 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", default=r"D:\project\hks\my_agent")
-    parser.add_argument("--zip", default=r"D:\project\hks\my_agent-arcbench-submission.zip")
+    parser.add_argument("--source", default=str(ROOT_DIR / "my_agent"))
+    parser.add_argument("--zip", default=str(ROOT_DIR / "my_agent-arcbench-submission.zip"))
     parser.add_argument("--with-dir-entries", action="store_true",
                         help="also emit explicit directory entries (some extractors need them)")
     parser.add_argument("--diagnostic", action="store_true",
@@ -85,7 +87,7 @@ def main() -> int:
 
     diagnostic_bytes: bytes | None = None
     if args.diagnostic:
-        diagnostic_bytes = Path(r"D:\project\hks\_diag_payload.py").read_bytes()
+        diagnostic_bytes = ROOT_DIR.joinpath("_diag_payload.py").read_bytes()
 
     files = 0
     dirs = 0

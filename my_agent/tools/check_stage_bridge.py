@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import os
 import sys
 import time
@@ -51,6 +52,9 @@ sys.path.insert(0, str(REPO))
 os.environ.setdefault("SKILLS_DIR", str(REPO.parent / "_no_such_skills_dir"))
 
 from langchain_core.tools import StructuredTool  # noqa: E402
+from langchain_core.messages import AIMessage, ToolMessage  # noqa: E402
+from langchain_core.tools import ToolException, tool  # noqa: E402
+from langgraph.types import Command  # noqa: E402
 
 from agents import test_driven_developer  # noqa: E402
 from agents.context.pipeline import context_pipeline  # noqa: E402
@@ -59,6 +63,14 @@ from agents.runtime.contracts import AgentRuntimeContext  # noqa: E402
 from agents.skills import selection  # noqa: E402
 from app.agent.runtime import current_workspace  # noqa: E402
 from app_type_handler import test_results, web as web_handler  # noqa: E402
+from app.agent.tool_calls import _inject_tool_args, run_calls, run_tools  # noqa: E402
+from app.agent.tools.todo import MAX_TODOS, TODO_TOOLS, add_todo, update_todo  # noqa: E402
+from agents.runtime.extra_tools import (  # noqa: E402
+    EXTRA_TOOLS_BY_STAGE,
+    build_extra_tools,
+    render_extra_tools,
+)
+from agents.runtime.workspace_tools import FILE_TOOLS  # noqa: E402
 
 failures: list[str] = []
 
@@ -916,6 +928,143 @@ def check_install_requests_dev_dependencies() -> None:
               " | ".join(m for m in messages if "did NOT complete" in m)[:300])
 
 
+def check_extra_tools_are_published_and_wired() -> None:
+    """Tool assembly and prompt publication must share one stage configuration."""
+
+    print()
+    print("--- extra tools are published and wired ---")
+    from agents.runtime import factory
+
+    for stage in ("interface_design", "test_generation", "implementation"):
+        configured = set(EXTRA_TOOLS_BY_STAGE.get(stage, ()))
+        published = set(re.findall(r"`([a-zA-Z_][a-zA-Z0-9_]*)`", render_extra_tools(stage)))
+        check(f"{stage}: published names match configuration", published == configured,
+              f"published={sorted(published)} configured={sorted(configured)}")
+        if stage != "implementation":
+            continue
+        built = build_extra_tools(stage, read_tools=FILE_TOOLS, workspace_root=str(REPO))
+        check("implementation exposes all five extra tools",
+              {item.name for item in built} == configured,
+              str([item.name for item in built]))
+        from agents.runtime.factory import build_stage_agent
+        probe = build_stage_agent(
+            name="implementation_bridge_probe",
+            stage=stage,
+            system_prompt="BASE PROMPT",
+            workspace_root=str(REPO),
+        )
+        todo_objects = {id(item) for item in TODO_TOOLS}
+        check("injected todo tools bypass guard wrapping",
+              all(id(item) in todo_objects for item in probe.tools if item.name in configured - {"subagent"}))
+        assembled = factory._with_response_shape(
+            "BASE PROMPT", response_format=None, skills=None,
+            permitted_skill_names=None, stage=stage,
+        )
+        check("extra tool publication follows stage limits",
+              assembled.index("### Extra Tools (available)") > assembled.index("### Stage Limits (enforced)"))
+
+
+def check_subagent_read_only_boundary() -> None:
+    """The subgraph constructor rejects write tools and exposes a small schema."""
+
+    print()
+    print("--- subagent read-only boundary ---")
+    from app.agent.tools.subagent import build_subagent_tool
+    from agents.runtime.workspace_tools import edit_file, read_file, write_file
+
+    for label, forbidden in (("write_file", write_file), ("edit_file", edit_file)):
+        try:
+            build_subagent_tool(read_tools=[forbidden], workspace_root=str(REPO))
+        except AssertionError:
+            rejected = True
+        else:
+            rejected = False
+        check(f"subagent rejects {label}", rejected)
+
+    child = build_subagent_tool(read_tools=[read_file], workspace_root=str(REPO))
+    check("subagent public schema has only description and prompt",
+          set(child.tool_call_schema.model_fields) == {"description", "prompt"})
+
+
+def check_todo_and_command_behaviour() -> None:
+    """Todo validation and Command updates must survive the handwritten tool node."""
+
+    print()
+    print("--- todo and Command behaviour ---")
+
+    def invoke(tool_obj, args, state, call_id):
+        injected = _inject_tool_args(tool_obj, args, call_id, state)
+        return asyncio.run(tool_obj.ainvoke({
+            "name": tool_obj.name, "args": injected, "id": call_id, "type": "tool_call",
+        }))
+
+    state: dict = {"messages": [], "todo_list": []}
+    command = invoke(add_todo, {"task_desc": "first"}, state, "todo-1")
+    check("add_todo returns Command", isinstance(command, Command))
+    state["todo_list"] = command.update["todo_list"]
+    first_id = state["todo_list"][0]["id"]
+    command = invoke(update_todo, {"id": first_id, "status": "in_progress"}, state, "todo-2")
+    state["todo_list"] = command.update["todo_list"]
+    check("update_todo enters in_progress", state["todo_list"][0]["status"] == "in_progress")
+
+    try:
+        invoke(update_todo, {"id": "missing", "status": "completed"}, state, "todo-bad-id")
+    except ToolException:
+        bad_id = True
+    else:
+        bad_id = False
+    check("invalid todo id uses fail()", bad_id)
+
+    state["todo_list"].append({"id": "t2", "task_desc": "second", "status": "pending", "progress": "", "deadline": ""})
+    try:
+        invoke(update_todo, {"id": "t2", "status": "in_progress"}, state, "todo-bad-active")
+    except ToolException:
+        two_active = True
+    else:
+        two_active = False
+    check("two in_progress todos use fail()", two_active)
+
+    state["todo_list"] = [
+        {"id": f"t{i}", "task_desc": str(i), "status": "pending", "progress": "", "deadline": ""}
+        for i in range(1, MAX_TODOS + 1)
+    ]
+    try:
+        invoke(add_todo, {"task_desc": "overflow"}, state, "todo-overflow")
+    except ToolException:
+        overflow = True
+    else:
+        overflow = False
+    check("todo limit uses fail()", overflow)
+
+    batch = [
+        {"name": "add_todo", "args": {"task_desc": "batch one"}, "id": "todo-batch-1", "type": "tool_call"},
+        {"name": "add_todo", "args": {"task_desc": "batch two"}, "id": "todo-batch-2", "type": "tool_call"},
+    ]
+    batch_results = asyncio.run(run_calls(
+        batch, {"configurable": {"tools": TODO_TOOLS}}, {}, {"messages": [], "todo_list": []},
+    ))
+    final_ids = [item["id"] for item in batch_results[-1].update["todo_list"]]
+    check("same-batch add_todo calls allocate distinct ids", final_ids == ["t1", "t2"])
+
+    @tool
+    async def command_probe(value: str) -> Command:
+        """Return a state update and its matching tool message."""
+        return Command(update={
+            "todo_list": [{"id": "t1", "task_desc": value, "status": "pending", "progress": "", "deadline": ""}],
+            "messages": [ToolMessage(content="probe-ok", tool_call_id="probe-1")],
+        })
+
+    from langchain_core.runnables import RunnableLambda
+    output = asyncio.run(RunnableLambda(run_tools).ainvoke(
+        {"messages": [AIMessage(content="", tool_calls=[{
+            "name": "command_probe", "args": {"value": "state"}, "id": "probe-1", "type": "tool_call",
+        }])], "todo_list": []},
+        config={"configurable": {"tools": [command_probe]}},
+    ))
+    check("run_tools preserves Command state update", output.get("todo_list", [{}])[0].get("task_desc") == "state")
+    check("run_tools preserves Command ToolMessage", isinstance(output.get("messages", [None])[0], ToolMessage))
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -933,6 +1082,9 @@ def main() -> int:
     check_test_runners_fail_fast_instead_of_hanging()
     check_install_is_verified_not_assumed()
     check_install_requests_dev_dependencies()
+    check_extra_tools_are_published_and_wired()
+    check_subagent_read_only_boundary()
+    check_todo_and_command_behaviour()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0

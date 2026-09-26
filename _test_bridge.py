@@ -16,9 +16,10 @@ import time
 import urllib.request
 from pathlib import Path
 
-REPO = Path(r"D:\project\hks\my_agent")
+ROOT = Path(__file__).resolve().parent
+REPO = ROOT / "my_agent"
 MOCK_PORT = 8931
-WORKSPACE = Path(r"D:\project\hks\_arc_test_out")
+WORKSPACE = ROOT / "_arc_test_out"
 
 sys.path.insert(0, str(REPO))
 
@@ -62,7 +63,7 @@ def main() -> int:
             "-m",
             "uvicorn",
             "--app-dir",
-            r"D:\project\hks",
+            str(ROOT),
             "_mock_llm:app",
             "--port",
             str(MOCK_PORT),
@@ -82,6 +83,7 @@ def main() -> int:
         from core.service import configure_runtime
         from agents.interface_designer import InterfaceDesigner
         from agents.test_generator import TestGenerator
+        from agents.runtime.factory import build_stage_agent
 
         # The workspace the stage agent is trusted with.
         (WORKSPACE / "package.json").write_text('{"name":"workspace"}\n', encoding="utf-8")
@@ -131,6 +133,31 @@ def main() -> int:
         tests, _ = asyncio.run(generator.run("REQ-1", requirement_data))
         print("      tests  ->", json_dump(tests))
         check("TestGenerator returned a test", bool(tests) and tests[0].get("test_id") == "REQ-1:unit:app")
+
+        implementation = build_stage_agent(
+            name="implementation_probe",
+            stage="implementation",
+            system_prompt="Implementation probe.",
+            workspace_root=str(WORKSPACE),
+        )
+        implementation_names = {tool.name for tool in implementation.tools}
+        expected_extra = {"subagent", "add_todo", "list_todo", "update_todo", "complete_todo"}
+        check("implementation binds all five extra tools", expected_extra.issubset(implementation_names), str(sorted(implementation_names)))
+        check(
+            "implementation prompt publishes all five extra tools",
+            all(f"`{name}`" in implementation.system_prompt for name in expected_extra),
+        )
+
+        state = asyncio.run(implementation.graph.ainvoke(
+            {"messages": [{"role": "user", "content": "Implementation probe."}], "todo_list": []},
+            config=implementation._run_config({"configurable": {"thread_id": "implementation-probe"}}),
+        ))
+        check("mock model invoked add_todo and state was updated",
+              len(state.get("todo_list") or []) == 1
+              and state["todo_list"][0]["task_desc"] == "mock implementation task")
+        check("todo call returned a ToolMessage",
+              any(getattr(message, "tool_call_id", None) == "call_add_todo_1"
+                  for message in state.get("messages", [])))
 
         with urllib.request.urlopen(f"http://127.0.0.1:{MOCK_PORT}/__calls") as response:
             import json as _json
