@@ -51,7 +51,11 @@ _gittest/
 # ---------------------------------------------------------------------------
 .arc/
 *.log
+
+# Platform run logs, kept local only. They are large (3-4 MB each) and the
+# findings drawn from them live in commit messages and HANDOVER.md instead.
 new log.txt
+new ticket log.txt
 
 # ---------------------------------------------------------------------------
 # Local secrets - .env.example stays tracked, a real .env never does
