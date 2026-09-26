@@ -97,7 +97,9 @@ def get_user_prompt(
     sections = [
         f"### Current Node\n`{node_id}`",
     ]
-    if interface_contract.strip():
+    # The shared dynamic context already carries the node-session interface block.
+    # Keep this argument as a fallback for callers that build prompts directly.
+    if interface_contract.strip() and "<interfaces>" not in dynamic_context:
         sections.append(f"### Current Interface Contract\n{interface_contract.strip()}")
     sections.extend([
         "### Dynamic Context",

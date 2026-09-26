@@ -31,8 +31,7 @@ def load_project_env(env_path: str | os.PathLike[str] | None = None) -> None:
             value = value.strip().strip('"').strip("'")
             if key and key not in os.environ:
                 os.environ[key] = value
-    _copy_env_if_missing("OPENAI_KEY", "OPENAI_API_KEY")
-    _copy_env_if_missing("OPENAI_BASE_URL", "OPENAI_API_BASE")
+    _sync_model_env_aliases()
 
 
 def set_workspace_root(path: str | os.PathLike[str]) -> None:
@@ -106,6 +105,17 @@ def _copy_env_if_missing(source: str, target: str) -> None:
         os.environ[target] = source_value
 
 
+def _sync_model_env_aliases() -> None:
+    """Keep ARC's and my-agent's model variable names interchangeable."""
+    _copy_env_if_missing("OPENAI_KEY", "OPENAI_API_KEY")
+    _copy_env_if_missing("LLM_API_KEY", "OPENAI_API_KEY")
+    _copy_env_if_missing("LLM_BASE_URL", "OPENAI_BASE_URL")
+    _copy_env_if_missing("LLM_MODEL", "MODEL")
+    _copy_env_if_missing("ARCBENCH_MODEL", "MODEL")
+    _copy_env_if_missing("OPENAI_API_BASE", "OPENAI_BASE_URL")
+    _copy_env_if_missing("OPENAI_BASE_URL", "OPENAI_API_BASE")
+
+
 def check_config() -> dict[str, Any]:
     """
     Validate ARC configuration and environment.
@@ -116,6 +126,7 @@ def check_config() -> dict[str, Any]:
       - "warnings": list of non-critical issues
       - "info": list of informational messages
     """
+    _sync_model_env_aliases()
     errors = []
     warnings = []
     info = []
@@ -167,7 +178,7 @@ def check_config() -> dict[str, Any]:
     # Check .env file presence
     env_file = Path(".env")
     if not env_file.exists():
-        warnings.append("No .env file found in current directory (copy .env_example to .env)")
+        warnings.append("No .env file found in current directory (copy .env.example to .env)")
     else:
         info.append(f"Configuration loaded from {env_file.resolve()}")
 
@@ -249,7 +260,7 @@ def print_health_check() -> int:
     else:
         print(f"{Fore.RED}✗ Configuration has errors. Fix them before running ARC.{Style.RESET_ALL}\n")
         print(f"{Fore.WHITE}Quick fix:{Style.RESET_ALL}")
-        print(f"  1. Copy .env_example to .env")
+        print(f"  1. Copy .env.example to .env")
         print(f"  2. Edit .env and fill in your API credentials")
         print(f"  3. Run: arc doctor\n")
         return 1

@@ -42,6 +42,8 @@ SKIP_DIRS = {
     ".vscode",
     ".pytest_cache",
     "dist",
+    # Local verification artifacts must never be uploaded with the agent.
+    "work",
 }
 SKIP_SUFFIXES = {".pyc", ".pyo", ".log"}
 SKIP_NAMES = {".env"}

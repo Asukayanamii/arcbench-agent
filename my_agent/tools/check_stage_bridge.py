@@ -208,6 +208,52 @@ def check_path_keys_are_normalised() -> None:
         probe.unlink(missing_ok=True)
 
 
+def check_interface_contract_is_not_duplicated() -> None:
+    """Ensure normal shared context does not repeat the full interface JSON."""
+
+    print()
+    print("--- interface contract is not duplicated ---")
+
+    from agents.context.prompts import test_driven_developer, test_generator
+
+    dynamic = "<interfaces>\n[{\"interface_id\": \"IF-1\"}]\n</interfaces>"
+    contract = "[{\"interface_id\": \"IF-1\"}]"
+    generator_prompt = test_generator.get_user_prompt(
+        node_id="REQ-1",
+        requirement_data={"id": "REQ-1"},
+        dynamic_context=dynamic,
+        interface_contract=contract,
+    )
+    check(
+        "TestGenerator does not repeat a contract already in dynamic context",
+        "### Current Interface Contract" not in generator_prompt,
+    )
+
+    developer_prompt = test_driven_developer.get_user_prompt(
+        node_id="REQ-1",
+        dynamic_context=dynamic,
+        interface_contract=contract,
+        test_files=[],
+        test_type="Unit",
+        node_tests=[],
+    )
+    check(
+        "TestDrivenDeveloper does not repeat a contract already in dynamic context",
+        "### Current Interface Contract" not in developer_prompt,
+    )
+
+    fallback_prompt = test_generator.get_user_prompt(
+        node_id="REQ-1",
+        requirement_data={"id": "REQ-1"},
+        dynamic_context="<requirement_focus/>",
+        interface_contract=contract,
+    )
+    check(
+        "prompt keeps the explicit contract fallback",
+        "### Current Interface Contract" in fallback_prompt,
+    )
+
+
 def check_guard_unlocks_after_a_failing_validation() -> None:
     """A failing `run_tests` must unlock the paths this stage already wrote.
 
@@ -269,6 +315,7 @@ def main() -> int:
     check_pagination()
     check_path_keys_are_normalised()
     check_stage_limits_are_published()
+    check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))

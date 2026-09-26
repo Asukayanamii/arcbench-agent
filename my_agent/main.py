@@ -88,7 +88,12 @@ def _preflight() -> None:
             lines.append(f"{indent}  ... {len(filenames) - 20} more")
     lines.append("=" * 72)
 
-    print("\n".join(lines), file=sys.stderr)
+    # ARC runners expose stdout as the primary console stream. Keep stderr too
+    # for local shell diagnostics, but ensure a failed upload is visible in the
+    # platform's short output panel.
+    message = "\n".join(lines)
+    print(message, flush=True)
+    print(message, file=sys.stderr, flush=True)
     raise SystemExit(2)
 
 

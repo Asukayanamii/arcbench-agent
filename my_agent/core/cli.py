@@ -721,6 +721,20 @@ def print_compilation_summary(
         print(f"{Fore.GREEN}✓ Passed:{Style.RESET_ALL}  {', '.join(passed)}")
     if failed:
         print(f"{Fore.RED}✗ Failed:{Style.RESET_ALL}  {', '.join(failed)}")
+        details_by_node = {}
+        for detail in result.get("failure_details") or []:
+            node_id = str(detail.get("node_id") or "").strip()
+            if node_id and node_id not in details_by_node:
+                details_by_node[node_id] = detail
+        for node_id in failed:
+            detail = details_by_node.get(node_id) or {}
+            phase = detail.get("phase")
+            error = detail.get("error") or detail.get("summary") or "No node-level error summary was recorded."
+            label = f" ({phase})" if phase else ""
+            compact_error = " ".join(str(error).split())
+            if len(compact_error) > 600:
+                compact_error = compact_error[:597] + "..."
+            print(f"   {Fore.RED}{node_id}{label}:{Style.RESET_ALL} {compact_error}")
     if skipped:
         print(f"{Fore.YELLOW}⊙ Skipped:{Style.RESET_ALL} {', '.join(skipped)}")
     
@@ -743,8 +757,13 @@ def print_compilation_summary(
     
     # Next steps
     if failed:
+        report_paths = result.get("failure_report_paths") or {}
+        if report_paths.get("text"):
+            print(f"{Fore.WHITE}Failure report:{Style.RESET_ALL} {report_paths['text']}")
+        if report_paths.get("json"):
+            print(f"{Fore.WHITE}Failure report JSON:{Style.RESET_ALL} {report_paths['json']}")
         print(f"\n{Fore.YELLOW}Next steps:{Style.RESET_ALL}")
-        print(f"  • Review failure details in debug log")
+        print(f"  • Review the failure report and debug log above")
         print(f"  • Fix requirement issues and retry: arc compile <input> -o {output_dir} --resume --retry-failed")
     elif result.get("ok"):
         print(f"\n{Fore.GREEN}✓ Compilation successful{Style.RESET_ALL}")

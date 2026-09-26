@@ -6,6 +6,7 @@ import os
 import shutil
 import sys
 import time
+import traceback
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from core.cli import (
     stop_cli_spinner,
 )
 from core.config import set_web_port
+from core.failure_report import write_failure_report
 from core.workflow import ARCWorkflowManager, load_project_metadata
 
 
@@ -315,6 +317,7 @@ async def cmd_compile(args: argparse.Namespace) -> int:
     
     # Run compilation
     start_time = time.time()
+    result: dict = {"ok": False, "failed_nodes": [], "failure_details": []}
     try:
         workflow_manager = ARCWorkflowManager(
             workspace_path=config.output_dir,
@@ -336,18 +339,37 @@ async def cmd_compile(args: argparse.Namespace) -> int:
             test_intent=config.test_intent,
             sync_requirements=config.sync_requirements,
         )
+    except Exception as exc:
+        elapsed = time.time() - start_time
+        trace = traceback.format_exc()
+        report_paths = write_failure_report(
+            output_dir=config.output_dir,
+            requirement_path=config.requirement_path,
+            elapsed_seconds=elapsed,
+            result=result,
+            exception=exc,
+            exception_traceback=trace,
+        )
+        print("\nARC COMPILATION FAILED", flush=True)
+        print(f"{type(exc).__name__}: {exc}", flush=True)
+        print(trace.rstrip(), flush=True)
+        print(f"Failure report: {report_paths['text']}", flush=True)
+        print(f"Failure report JSON: {report_paths['json']}", flush=True)
+        return 1
     finally:
         stop_cli_spinner()
     
     elapsed = time.time() - start_time
+    if not result.get("ok"):
+        report_paths = write_failure_report(
+            output_dir=config.output_dir,
+            requirement_path=config.requirement_path,
+            elapsed_seconds=elapsed,
+            result=result,
+        )
+        result["failure_report_paths"] = report_paths
     print_compilation_summary(result, config.output_dir, elapsed)
-    
-    # A completed compilation is a successful CLI operation even when one or
-    # more requirement nodes/tests remain failed. The detailed result and
-    # generated artifacts communicate requirement coverage; the process exit
-    # code is reserved for invocation/configuration/runtime failures that
-    # prevent ARC from completing its workflow.
-    return 0
+    return 0 if result.get("ok") else 1
 
 
 # ============================================================
@@ -427,11 +449,34 @@ def main() -> None:
     args = parser.parse_args(argv)
 
     
-    # Call subcommand handler
-    if asyncio.iscoroutinefunction(args.func):
-        exit_code = asyncio.run(args.func(args))
-    else:
-        exit_code = args.func(args)
+    # Keep pre-workflow failures visible too (bad input paths, dependency/import
+    # errors, and other exceptions that occur before the workspace is initialized).
+    try:
+        if asyncio.iscoroutinefunction(args.func):
+            exit_code = asyncio.run(args.func(args))
+        else:
+            exit_code = args.func(args)
+    except Exception as exc:
+        trace = traceback.format_exc()
+        print("\nARC UNHANDLED FAILURE", flush=True)
+        print(f"{type(exc).__name__}: {exc}", flush=True)
+        print(trace.rstrip(), flush=True)
+        output_dir = str(getattr(args, "output_dir", "") or "").strip()
+        if output_dir:
+            try:
+                report_paths = write_failure_report(
+                    output_dir=output_dir,
+                    requirement_path=str(getattr(args, "requirement_path", "") or ""),
+                    elapsed_seconds=0,
+                    result={"ok": False},
+                    exception=exc,
+                    exception_traceback=trace,
+                )
+                print(f"Failure report: {report_paths['text']}", flush=True)
+                print(f"Failure report JSON: {report_paths['json']}", flush=True)
+            except Exception as report_exc:
+                print(f"Could not write failure report: {type(report_exc).__name__}: {report_exc}", flush=True)
+        sys.exit(1)
     
     sys.exit(exit_code)
 

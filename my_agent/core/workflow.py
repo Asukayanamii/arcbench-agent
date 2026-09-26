@@ -4,6 +4,7 @@ import os
 import shutil
 import hashlib
 import json
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
@@ -365,6 +366,7 @@ class ARCWorkflowManager:
             allow_requirement_tree_change=sync_requirements,
         )
         self._sync_queue_node_states(queue_state)
+        failure_details: list[dict[str, Any]] = []
         recovered_tasks = self._recover_interrupted_queue(queue_state)
         retry_plan = self._apply_retry_plan(
             queue_state,
@@ -475,6 +477,16 @@ class ARCWorkflowManager:
                     "error",
                     node_id,
                 )
+                failure_details.append(
+                    {
+                        "kind": "phase_exception",
+                        "node_id": node_id,
+                        "phase": phase,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc) or repr(exc),
+                        "traceback": traceback.format_exc(),
+                    }
+                )
                 task_ok = False
 
             if task_ok:
@@ -501,6 +513,18 @@ class ARCWorkflowManager:
                 continue
 
             task["status"] = TASK_FAILED
+            if not any(item.get("node_id") == node_id and item.get("phase") == phase for item in failure_details):
+                session = sessions.load_node_session(node_id)
+                failure_details.append(
+                    {
+                        "kind": "phase_failure",
+                        "node_id": node_id,
+                        "phase": phase,
+                        "summary": str(session.get("recent_failure_summary") or "").strip()
+                        or self._recent_failure_log(node_id)
+                        or f"{phase} returned failure without a detailed summary.",
+                    }
+                )
             if task.get("operation_id"):
                 self._set_operation_status(queue_state, task, TASK_FAILED)
             if not is_scoped_operation:
@@ -525,7 +549,7 @@ class ARCWorkflowManager:
             await self._commit_phase_checkpoint(node_id, f"{phase}-FAILED", requirement_data)
             await self._log("Compiler", f"{phase} failed for node {node_id}.", "error", node_id)
 
-        return self._build_compile_result(queue_state)
+        return self._build_compile_result(queue_state, failure_details=failure_details)
 
     def _append_selected_tdd_task(
         self,
@@ -1182,7 +1206,11 @@ class ARCWorkflowManager:
         self.runtime.events.mark_implementation_started(node_id)
 
     @staticmethod
-    def _build_compile_result(queue_state: dict[str, Any]) -> dict[str, Any]:
+    def _build_compile_result(
+        queue_state: dict[str, Any],
+        *,
+        failure_details: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         failed_nodes = sorted(
             node_id for node_id, state in queue_state["node_states"].items() if state == NODE_FAILED
         )
@@ -1205,10 +1233,24 @@ class ARCWorkflowManager:
             "failed_operations": failed_operations,
             "visit_order": completed_tasks,
             "states": dict(queue_state["node_states"]),
+            "failure_details": failure_details or [],
         }
 
     def _save_processing_queue(self, queue_state: dict[str, Any]) -> None:
         write_json_file(self.queue_path, queue_state)
+
+    def _recent_failure_log(self, node_id: str, *, limit: int = 8) -> str:
+        """Recover the last error lines when a phase returns False without a session summary."""
+        log_path = Path(self.arc_dir) / "debug.log"
+        if not log_path.is_file():
+            return ""
+        try:
+            lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return ""
+        marker = f"[{node_id}]"
+        matches = [line for line in lines if marker in line and "[error]" in line.lower()]
+        return "\n".join(matches[-limit:])
 
     async def _log(
         self,
