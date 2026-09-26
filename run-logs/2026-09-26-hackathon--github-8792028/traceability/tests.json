@@ -1,0 +1,85 @@
+{
+  "REQ-1-1-1-E2E-REGISTER-ACCOUNT": {
+    "test_id": "REQ-1-1-1-E2E-REGISTER-ACCOUNT",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-UI-SIGN-IN-PAGE",
+      "REQ-1-1-1-UI-SESSION-PROVIDER",
+      "REQ-1-1-1-UI-ACCOUNT-HEADER",
+      "REQ-1-1-1-UI-APP-ROUTES",
+      "REQ-1-1-1-UI-APP-ROOT",
+      "REQ-1-1-1-API-AUTH-ROUTES",
+      "REQ-1-1-1-API-REGISTER-CLIENT",
+      "REQ-1-1-1-API-SESSION-CLIENT",
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-DB-SEED-ACCOUNTS"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/register-account.spec.js",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INT-AUTH-ROUTES": {
+    "test_id": "REQ-1-1-1-INT-AUTH-ROUTES",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-API-AUTH-ROUTES",
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-API-REGISTER-CLIENT",
+      "REQ-1-1-1-API-SESSION-CLIENT",
+      "REQ-1-1-1-DB-USERS-REPOSITORY",
+      "REQ-1-1-1-DB-SESSIONS-REPOSITORY",
+      "REQ-1-1-1-DB-USER-SCHEMA",
+      "REQ-1-1-1-DB-SEED-ACCOUNTS"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/api/auth_routes.test.js",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INT-AUTH-SERVICE": {
+    "test_id": "REQ-1-1-1-INT-AUTH-SERVICE",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-FUNC-AUTH-SERVICE",
+      "REQ-1-1-1-DB-USERS-REPOSITORY",
+      "REQ-1-1-1-DB-SESSIONS-REPOSITORY",
+      "REQ-1-1-1-DB-USER-SCHEMA",
+      "REQ-1-1-1-DB-SEED-ACCOUNTS"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/services/auth_service.test.js",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-INT-REGISTER-PAGE": {
+    "test_id": "REQ-1-1-1-INT-REGISTER-PAGE",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-REGISTER-PAGE",
+      "REQ-1-1-1-FUNC-REGISTRATION-RULES",
+      "REQ-1-1-1-API-REGISTER-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/features/auth/RegisterPage.test.tsx",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-UNIT-REGISTRATION-RULES": {
+    "test_id": "REQ-1-1-1-UNIT-REGISTRATION-RULES",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-FUNC-REGISTRATION-RULES"
+    ],
+    "type": "Unit",
+    "file_path": "frontend/tests/features/auth/registrationRules.test.ts",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  }
+}
