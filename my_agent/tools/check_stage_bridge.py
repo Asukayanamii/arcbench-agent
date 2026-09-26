@@ -844,6 +844,78 @@ def check_install_is_verified_not_assumed() -> None:
               f"got {web_handler._missing_declared_dependencies(tmp)}")
 
 
+def check_install_requests_dev_dependencies() -> None:
+    """安装必须显式要 dev 依赖，不能被宿主的 `NODE_ENV=production` 决定（issue #27）。
+
+    这是「测试与构建工具永远不可用」的真正根因：这个项目的测试与构建工具链**全部声明在
+    `devDependencies`**（vitest / playwright / supertest / vite / tailwind…），而宿主的
+    `NODE_ENV=production` 让 npm 推断出 `omit=dev`，一个都不装 —— **npm 仍退出 0、
+    仍报 `added N packages`**，所以从退出码到日志都看不出问题。实测 backend 的 6 个、
+    frontend 的 17 个 devDeps 全部缺失。
+
+    这条检查刻意做**真行为验证**而不是扫源码：在 `NODE_ENV=production` 下跑一次真实的
+    `npm install`，断言一个 devDependency 确实落到了 `node_modules`。依赖用本地
+    `file:` 路径声明，所以不碰网络、也不需要已有缓存。npm 不可用时跳过而不是误报。
+    """
+
+    print()
+    print("--- the install requests dev dependencies ---")
+
+    import shutil as _shutil  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    if _shutil.which("npm") is None:
+        print("  SKIP  npm is not on PATH")
+        return
+
+    with tempfile.TemporaryDirectory(prefix="arc-devdep-probe-") as tmp:
+        root = Path(tmp)
+        probe = root / "probe-dep"
+        probe.mkdir()
+        (probe / "package.json").write_text(
+            json.dumps({"name": "arc-probe-dep", "version": "1.0.0"}), encoding="utf-8"
+        )
+        (root / "package.json").write_text(
+            json.dumps(
+                {
+                    "name": "arc-probe-root",
+                    "version": "1.0.0",
+                    "dependencies": {"arc-probe-runtime": "file:./probe-dep"},
+                    "devDependencies": {"arc-probe-dev": "file:./probe-dep"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        messages: list[str] = []
+
+        def collect(_name: str, message: str, *_rest) -> None:
+            messages.append(str(message))
+
+        saved = os.environ.get("NODE_ENV")
+        # 关键：复刻宿主环境。没有修复时，这一行会让 devDependencies 被整个跳过。
+        os.environ["NODE_ENV"] = "production"
+        try:
+            asyncio.run(web_handler.run_npm_install(tmp, collect))
+        finally:
+            if saved is None:
+                os.environ.pop("NODE_ENV", None)
+            else:
+                os.environ["NODE_ENV"] = saved
+
+        installed = (root / "node_modules" / "arc-probe-dev").exists()
+        check("a devDependency is installed even with NODE_ENV=production",
+              installed,
+              f"missing; npm said: {' | '.join(messages)[:300]}")
+
+        check("the install reports success for a complete tree",
+              any("NPM install success" in m for m in messages),
+              " | ".join(messages)[:300])
+        check("it did not report a failure",
+              not any("did NOT complete" in m for m in messages),
+              " | ".join(m for m in messages if "did NOT complete" in m)[:300])
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -860,6 +932,7 @@ def main() -> int:
     check_timeouts_are_configurable_and_distinguishable()
     check_test_runners_fail_fast_instead_of_hanging()
     check_install_is_verified_not_assumed()
+    check_install_requests_dev_dependencies()
     print()
     print("result: " + ("ALL OK" if not failures else f"{len(failures)} FAILED -> {failures}"))
     return 1 if failures else 0

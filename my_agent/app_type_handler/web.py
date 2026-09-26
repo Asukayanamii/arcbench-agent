@@ -73,10 +73,20 @@ async def run_npm_install(target_dir: str, log_cb: Callable[..., Awaitable[None]
         returncode = -1
         try:
             process = await asyncio.create_subprocess_shell(
-                "npm install",
+                # 显式要求装 dev 依赖。这个项目的**测试与构建工具链全部声明在
+                # devDependencies 里**（vitest / playwright / supertest / vite / tailwind…），
+                # 而宿主的 `NODE_ENV=production` 会让 npm 推断出 `omit=dev`，
+                # 于是一个都不装 —— npm 却仍然退出 0、报 "added N packages"，看起来完全正常。
+                # 实测：backend 的 6 个 devDeps、frontend 的 17 个 devDeps 全部缺失，
+                # 下游只表现为 `'vite' is not recognized`（issue #27）。
+                # `--include=dev` 直接写死在命令行上，不依赖任何环境推断。
+                "npm install --include=dev",
                 cwd=target_dir,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # 再把 NODE_ENV 钉成 development：`--include=dev` 已经够了，但宿主如果设了
+                # 别的 npm 配置（production=true / omit=dev）仍可能干扰，这里一并挡掉。
+                env={**os.environ, "NODE_ENV": "development"},
                 # 自成一个进程组/会话，超时或被取消时才能整棵树收掉（见 core.processes）。
                 start_new_session=True,
             )
