@@ -64,7 +64,15 @@ from agents.skills import selection  # noqa: E402
 from app.agent.runtime import current_workspace  # noqa: E402
 from app_type_handler import test_results, web as web_handler  # noqa: E402
 from app.agent.tool_calls import _inject_tool_args, run_calls, run_tools  # noqa: E402
-from app.agent.tools.todo import MAX_TODOS, TODO_TOOLS, add_todo, update_todo  # noqa: E402
+from app.agent.tools.todo import (  # noqa: E402
+    MAX_TODOS,
+    TODO_TOOLS,
+    add_todo,
+    complete_todo,
+    list_todo,
+    reduce_todos,
+    update_todo,
+)
 from agents.runtime.extra_tools import (  # noqa: E402
     EXTRA_TOOLS_BY_STAGE,
     build_extra_tools,
@@ -1001,11 +1009,23 @@ def check_todo_and_command_behaviour() -> None:
     state: dict = {"messages": [], "todo_list": []}
     command = invoke(add_todo, {"task_desc": "first"}, state, "todo-1")
     check("add_todo returns Command", isinstance(command, Command))
-    state["todo_list"] = command.update["todo_list"]
+    check("add_todo returns only the new item", command.update["todo_list"]["item"]["task_desc"] == "first")
+    state["todo_list"] = reduce_todos(state["todo_list"], command.update["todo_list"])
     first_id = state["todo_list"][0]["id"]
     command = invoke(update_todo, {"id": first_id, "status": "in_progress"}, state, "todo-2")
-    state["todo_list"] = command.update["todo_list"]
+    check("update_todo returns only the changed item", command.update["todo_list"]["item"]["id"] == first_id)
+    state["todo_list"] = reduce_todos(state["todo_list"], command.update["todo_list"])
     check("update_todo enters in_progress", state["todo_list"][0]["status"] == "in_progress")
+
+    command = invoke(list_todo, {}, state, "todo-3")
+    check("list_todo does not write a todo patch", "todo_list" not in command.update)
+    listed = json.loads(command.update["messages"][0].content)
+    check("list_todo returns the complete list", listed == state["todo_list"])
+
+    command = invoke(complete_todo, {"id": first_id}, state, "todo-4")
+    check("complete_todo returns only the completed item", command.update["todo_list"]["item"]["id"] == first_id)
+    state["todo_list"] = reduce_todos(state["todo_list"], command.update["todo_list"])
+    check("complete_todo marks the item completed", state["todo_list"][0]["status"] == "completed")
 
     try:
         invoke(update_todo, {"id": "missing", "status": "completed"}, state, "todo-bad-id")
@@ -1015,6 +1035,7 @@ def check_todo_and_command_behaviour() -> None:
         bad_id = False
     check("invalid todo id uses fail()", bad_id)
 
+    state["todo_list"][0]["status"] = "in_progress"
     state["todo_list"].append({"id": "t2", "task_desc": "second", "status": "pending", "progress": "", "deadline": ""})
     try:
         invoke(update_todo, {"id": "t2", "status": "in_progress"}, state, "todo-bad-active")
@@ -1043,7 +1064,10 @@ def check_todo_and_command_behaviour() -> None:
     batch_results = asyncio.run(run_calls(
         batch, {"configurable": {"tools": TODO_TOOLS}}, {}, {"messages": [], "todo_list": []},
     ))
-    final_ids = [item["id"] for item in batch_results[-1].update["todo_list"]]
+    batch_state = []
+    for result in batch_results:
+        batch_state = reduce_todos(batch_state, result.update["todo_list"])
+    final_ids = [item["id"] for item in batch_state]
     check("same-batch add_todo calls allocate distinct ids", final_ids == ["t1", "t2"])
 
     @tool

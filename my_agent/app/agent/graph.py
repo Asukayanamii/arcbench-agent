@@ -7,6 +7,7 @@ LangGraph 上，以及处理只有图才知道的事（superstep 上限）。
 """
 
 import logging
+from typing import Annotated
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -22,6 +23,7 @@ from app.agent.prompts import build_system_prompt
 from app.agent.retry import ainvoke_with_retry
 from app.agent.tool_calls import run_tools
 from app.agent.tools import TOOLS
+from app.agent.tools.todo import reduce_todos
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +72,7 @@ class AgentState(MessagesState):
     usage_anchor: dict | None
     """{tokens, upto}：上次请求 provider 实报的 input tokens + 那时覆盖到第几条消息。"""
 
-    todo_list: list[dict]
+    todo_list: Annotated[list[dict], reduce_todos]
     """模型按需维护的待办清单；不自动拼进 system prompt。"""
 
 

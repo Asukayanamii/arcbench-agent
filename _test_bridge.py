@@ -165,6 +165,11 @@ def main() -> int:
             calls = _json.loads(response.read().decode("utf-8"))
         check("model was called", calls["count"] >= 2, f"count={calls['count']}")
         check(
+            "mock model pulled the full todo list",
+            any("list_todo" in (call.get("tool_calls_returned") or []) for call in calls["calls"]),
+            "no list_todo call observed",
+        )
+        check(
             "the designer's read_file tool call was executed",
             any(call.get("has_tool_results") for call in calls["calls"]),
             "no tool result round-trip observed",

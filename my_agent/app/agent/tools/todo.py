@@ -29,17 +29,46 @@ def _state_todos(state: dict[str, Any]) -> list[dict[str, str]]:
     return [dict(item) for item in values if isinstance(item, dict)]
 
 
+def reduce_todos(
+    current: list[dict[str, str]] | None,
+    update: list[dict[str, str]] | dict[str, Any] | None,
+) -> list[dict[str, str]]:
+    """Apply a todo patch to graph state, or replace it for compatibility."""
+
+    todos = [dict(item) for item in (current or []) if isinstance(item, dict)]
+    if update is None:
+        return todos
+    if isinstance(update, list):
+        return [dict(item) for item in update if isinstance(item, dict)]
+    if not isinstance(update, dict):
+        return todos
+
+    operation = update.get("op")
+    item = update.get("item")
+    if not isinstance(item, dict):
+        return todos
+    item = dict(item)
+    item_id = str(item.get("id", ""))
+    if operation == "add":
+        return [*todos, item]
+    if operation in {"update", "complete"}:
+        return [item if row.get("id") == item_id else row for row in todos]
+    return todos
+
+
 def _message(tool_call_id: str, content: str) -> ToolMessage:
     return ToolMessage(content=content, tool_call_id=tool_call_id)
 
 
-def _command(tool_call_id: str, todos: list[dict[str, str]], content: str) -> Command:
-    return Command(
-        update={
-            "todo_list": todos,
-            "messages": [_message(tool_call_id, content)],
-        }
-    )
+def _command(
+    tool_call_id: str,
+    content: str,
+    todo_update: dict[str, Any] | None = None,
+) -> Command:
+    update: dict[str, Any] = {"messages": [_message(tool_call_id, content)]}
+    if todo_update is not None:
+        update["todo_list"] = todo_update
+    return Command(update=update)
 
 
 def _find(todos: list[dict[str, str]], todo_id: str) -> dict[str, str]:
@@ -73,7 +102,7 @@ async def add_todo(
     state: Annotated[dict[str, Any], InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Add one pending task to the todo list."""
+    """Add one pending task; call list_todo when the complete list is needed."""
 
     description = str(task_desc or "").strip()
     if not description:
@@ -92,8 +121,11 @@ async def add_todo(
         "progress": "",
         "deadline": str(deadline or "").strip(),
     }
-    todos.append(item)
-    return _command(tool_call_id, todos, json.dumps(item, ensure_ascii=False))
+    return _command(
+        tool_call_id,
+        json.dumps(item, ensure_ascii=False),
+        {"op": "add", "item": item},
+    )
 
 
 @tool
@@ -102,10 +134,10 @@ async def list_todo(
     state: Annotated[dict[str, Any], InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """List the current todo items; the list is intentionally pull-based."""
+    """Return the complete todo list; use this after incremental todo changes."""
 
     todos = _state_todos(state)
-    return _command(tool_call_id, todos, json.dumps(todos, ensure_ascii=False))
+    return _command(tool_call_id, json.dumps(todos, ensure_ascii=False))
 
 
 @tool
@@ -119,7 +151,7 @@ async def update_todo(
     state: Annotated[dict[str, Any], InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Update selected fields of one todo item."""
+    """Update one todo item; call list_todo when the complete list is needed."""
 
     todos = _state_todos(state)
     item = _find(todos, id)
@@ -136,7 +168,11 @@ async def update_todo(
     if deadline is not None:
         item["deadline"] = str(deadline).strip()
     _check_single_in_progress(todos)
-    return _command(tool_call_id, todos, json.dumps(item, ensure_ascii=False))
+    return _command(
+        tool_call_id,
+        json.dumps(item, ensure_ascii=False),
+        {"op": "update", "item": item},
+    )
 
 
 @tool
@@ -146,13 +182,17 @@ async def complete_todo(
     state: Annotated[dict[str, Any], InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """Mark one todo item completed."""
+    """Mark one todo item completed; call list_todo when the complete list is needed."""
 
     todos = _state_todos(state)
     item = _find(todos, id)
     item["status"] = "completed"
     item["progress"] = item.get("progress", "") or "完成"
-    return _command(tool_call_id, todos, json.dumps(item, ensure_ascii=False))
+    return _command(
+        tool_call_id,
+        json.dumps(item, ensure_ascii=False),
+        {"op": "complete", "item": item},
+    )
 
 
 TODO_TOOLS = [add_todo, list_todo, update_todo, complete_todo]
@@ -163,6 +203,7 @@ __all__ = [
     "TODO_STATUSES",
     "TODO_TOOLS",
     "TODO_TOOL_NAMES",
+    "reduce_todos",
     "add_todo",
     "list_todo",
     "update_todo",
