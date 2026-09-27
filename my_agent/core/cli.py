@@ -726,6 +726,7 @@ def print_compilation_summary(
             node_id = str(detail.get("node_id") or "").strip()
             if node_id and node_id not in details_by_node:
                 details_by_node[node_id] = detail
+        infra_nodes: list[str] = []
         for node_id in failed:
             detail = details_by_node.get(node_id) or {}
             phase = detail.get("phase")
@@ -734,7 +735,26 @@ def print_compilation_summary(
             compact_error = " ".join(str(error).split())
             if len(compact_error) > 600:
                 compact_error = compact_error[:597] + "..."
-            print(f"   {Fore.RED}{node_id}{label}:{Style.RESET_ALL} {compact_error}")
+            # 宿主异常与「层没过」必须分开说：前者是基础设施故障，不是通过率信号。
+            # 实测（run-logs/2026-09-27-competition-sheet-log4）：REQ-1-2-2 的 Unit 已经通过，
+            # 随后一个 JSONDecodeError 把节点判死 —— 输出里只显示 `JSONDecodeError: ...`，
+            # 与「层未通过」并排出现、读者分不出哪个该修 harness、哪个是真实成绩。issue #51。
+            is_infra = str(detail.get("kind") or "") == "phase_exception"
+            if is_infra:
+                infra_nodes.append(node_id)
+            kind_label = f"{Fore.MAGENTA}[INFRA]{Style.RESET_ALL} " if is_infra else ""
+            print(f"   {kind_label}{Fore.RED}{node_id}{label}:{Style.RESET_ALL} {compact_error}")
+        if infra_nodes:
+            # 这一行是本次修复的重点：让宿主故障在结果里**可数、可见**。
+            # failure_details 里本来就有 kind=phase_exception（workflow.py），只是从没被读出来。
+            print(
+                f"   {Fore.MAGENTA}{len(infra_nodes)} of {len(failed)} failed node(s) died from a HOST "
+                f"EXCEPTION rather than from failing tests:{Style.RESET_ALL} {', '.join(infra_nodes)}"
+            )
+            print(
+                f"   {Fore.MAGENTA}Those are harness/infrastructure failures - not a pass-rate signal, "
+                f"and fixable on our side.{Style.RESET_ALL}"
+            )
     if skipped:
         print(f"{Fore.YELLOW}⊙ Skipped:{Style.RESET_ALL} {', '.join(skipped)}")
     
