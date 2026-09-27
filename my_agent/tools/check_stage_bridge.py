@@ -1288,6 +1288,65 @@ def check_an_unattempted_layer_is_retried() -> None:
     check("the bound is declared before the loop", "max_empty_sessions = 2" in source)
 
 
+def check_suite_load_failure_is_distinguishable() -> None:
+    """「套件没加载起来」必须与「断言失败」可区分（issue #49）。
+
+    实测（`run-logs/2026-09-27-competition-sheet-log4`）：生成的测试里相对导入多了一层
+    `../` → `Failed to resolve import "../../src/components/workbook/..."` → 套件加载失败
+    → `(0 test)`。但回执里显示的仍是 `Test Files 1 failed` + `FAIL <file>` ——
+    和断言失败**一模一样**，于是 agent 一路去修实现，5 次预算全败，一次都没碰那行 import。
+
+    这条检查盯三件事：能识别、不误报、以及**插了提示之后退出码仍被正确解析**
+    （提示插在 `Exit Code:` 行之后，不能插在它之前）。
+    """
+
+    print()
+    print("--- a suite load failure is distinguishable ---")
+
+    real = (
+        "RUN  v4.1.11 /workspace/template/frontend\n"
+        "\n"
+        " ? tests/workbookListView.test.tsx (0 test)\n"
+        "\n"
+        " Test Files  1 failed (1)\n"
+        "      Tests  no tests\n"
+        "\n"
+        " Failed Suites 1\n"
+        " FAIL  tests/workbookListView.test.tsx [ tests/workbookListView.test.tsx ]\n"
+        'Error: Failed to resolve import "../../src/components/workbook/WorkbookListView" '
+        'from "tests/workbookListView.test.tsx". Does the file exist?\n'
+        "  Plugin: vite:import-analysis\n"
+    )
+    note = test_results.describe_suite_load_failure(real)
+    check("the real load-failure signature is recognised", bool(note), "got empty string")
+    check("it says zero tests ran", "zero tests were executed" in note)
+    check("it says this is NOT an assertion failure", "NOT an assertion failure" in note)
+    check("it tells the caller to fix the TEST FILE", "Fix the TEST FILE" in note)
+    check("it quotes the first Error: line",
+          "Failed to resolve import" in note, note[:160])
+
+    assertion_failure = (
+        " Test Files  1 failed (1)\n"
+        "      Tests  2 failed | 3 passed (5)\n"
+        " FAIL  tests/x.test.tsx > adds two numbers\n"
+        "AssertionError: expected 3 to be 4\n"
+    )
+    check("a plain assertion failure is NOT misreported",
+          test_results.describe_suite_load_failure(assertion_failure) == "",
+          "an assertion failure would be relabelled as a load failure")
+
+    # 提示插在 Exit Code 行之后：解析器取的是第一个 `Exit Code:`，插在前面会读错。
+    envelope = f"Exit Code: 1\n\n[ARC] {note}\n\n=== Frontend Vitest Batch ===\nExit Code: 1\n"
+    check("the parser still reads the right exit code with the note inserted",
+          test_results.parse_test_results(envelope)["exit_code"] == 1,
+          f"got {test_results.parse_test_results(envelope)['exit_code']}")
+
+    web_src = (REPO / "app_type_handler" / "web.py").read_text(encoding="utf-8", errors="replace")
+    check("run_test_group actually prepends the note",
+          "describe_suite_load_failure(" in web_src,
+          "the helper exists but nothing surfaces it to the agent")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1309,6 +1368,7 @@ def main() -> int:
     check_engine_state_dir_is_not_searchable()
     check_a_blocked_write_unlocks_its_path()
     check_an_unattempted_layer_is_retried()
+    check_suite_load_failure_is_distinguishable()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()

@@ -59,6 +59,55 @@ def parse_test_results(test_output: str) -> dict[str, Any]:
     return result
 
 
+SUITE_LOAD_FAILURE_MARKERS = (
+    "Failed to resolve import",
+    "Failed Suites",
+    "No test files found",
+    "Failed to load",
+)
+
+
+def describe_suite_load_failure(output: str) -> str:
+    """套件**没加载起来**时返回一句可执行的说明；否则返回空串。
+
+    必须与「测试跑了但断言失败」区分开 —— 两者在回执里长得一样
+    （都是 `Test Files 1 failed` + `FAIL <file>`），而该修的东西**正好相反**：
+
+    * 加载失败 → 修**测试文件**的导入/配置
+    * 断言失败 → 修**实现**
+
+    实测（`run-logs/2026-09-27-competition-sheet-log4`）：生成的测试里相对导入多了一层
+    `../`，报 `Failed to resolve import "../../src/components/workbook/..."` → 套件加载失败
+    → `(0 test)` → Unit 层 5 次预算全败，agent 一直在修实现，**一次都没碰那行 import**。
+    而提示词其实要求它就地修生成测试的缺陷 —— 信号不区分，它就无从知道该改哪边。
+
+    与 #14（超时被当成没失败）、#21（内层 124 被外层 1 掩盖）是同一类病。
+    """
+
+    text = output or ""
+    if not any(marker in text for marker in SUITE_LOAD_FAILURE_MARKERS):
+        return ""
+
+    detail = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Error:"):
+            detail = stripped[:300]
+            break
+    if not detail:
+        for line in text.splitlines():
+            if "Failed to resolve import" in line or "Failed to load" in line:
+                detail = line.strip()[:300]
+                break
+
+    return (
+        "The test suite failed to LOAD - zero tests were executed, so this is NOT an assertion "
+        "failure and the implementation has not been disproved. Fix the TEST FILE (imports, paths, "
+        "or test configuration) before touching the implementation."
+        + (f"\nFirst error: {detail}" if detail else "")
+    )
+
+
 def _extract_exit_code(output: str) -> int:
     for line in (output or "").splitlines():
         stripped = line.strip()
