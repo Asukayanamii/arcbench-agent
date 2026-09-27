@@ -1347,6 +1347,41 @@ def check_suite_load_failure_is_distinguishable() -> None:
           "the helper exists but nothing surfaces it to the agent")
 
 
+def check_host_exceptions_are_distinguishable_from_failures() -> None:
+    """宿主异常与「层未通过」在结果里必须可区分（issue #51）。
+
+    实测（`run-logs/2026-09-27-competition-sheet-log4`）：`REQ-1-2-2` 的 Unit **已经通过**，
+    随后一个 `JSONDecodeError` 把节点判死。但结果里只打印 `JSONDecodeError: ...`，
+    与「层未通过」并排出现 —— **读者分不出哪个是真实成绩、哪个该修 harness**。
+
+    而区分所需的数据**本来就有**：`core/workflow.py` 记 `kind=phase_exception`（带
+    `error_type` 与 `traceback`）与 `kind=phase_failure`（带 `summary`）两种。
+    问题只是从没被读出来 —— `cli.py` 的摘要两者一视同仁。
+
+    这条检查钉住：产出侧两种 kind 都在、消费侧真的按 kind 分开说。
+    """
+
+    print()
+    print("--- host exceptions are distinguishable from failures ---")
+
+    workflow = (REPO / "core" / "workflow.py").read_text(encoding="utf-8", errors="replace")
+    check("a raised phase exception is recorded as its own kind",
+          '"kind": "phase_exception"' in workflow)
+    check("a normal layer failure is recorded as a different kind",
+          '"kind": "phase_failure"' in workflow)
+
+    cli = (REPO / "core" / "cli.py").read_text(encoding="utf-8", errors="replace")
+    check("the summary reads the kind field",
+          'detail.get("kind")' in cli,
+          "the two kinds exist but nothing tells them apart in the output")
+    check("it marks the infrastructure ones visibly", "[INFRA]" in cli)
+    check("it counts them separately from real failures",
+          "died from a HOST" in cli and "EXCEPTION rather than from failing tests" in cli,
+          "a reader still cannot tell how many failures were ours vs the agent's")
+    check("it says they are not a pass-rate signal",
+          "not a pass-rate signal" in cli)
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1369,6 +1404,7 @@ def main() -> int:
     check_a_blocked_write_unlocks_its_path()
     check_an_unattempted_layer_is_retried()
     check_suite_load_failure_is_distinguishable()
+    check_host_exceptions_are_distinguishable_from_failures()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()
