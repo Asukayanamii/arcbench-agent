@@ -10,6 +10,7 @@ import inspect
 
 from typing import Awaitable, Callable
 
+from . import test_results
 from .base import AppTypeHandler
 from core.config import build_web_runtime_env, get_web_base_url, get_web_port
 from core.processes import finalize_subprocess
@@ -1171,7 +1172,17 @@ class WebAppType(AppTypeHandler):
                 )
 
             batch_exit_code = _batch_exit_code(exit_codes)
-            body = f"Exit Code: {batch_exit_code}\n\n" + "\n\n".join(sections)
+            sections_text = "\n\n".join(sections)
+            # 套件**没加载起来**时把结论顶到最前面（紧跟在 Exit Code 行之后）：
+            # 它和「断言失败」在原始输出里长得一样，模型很容易只看到末尾的
+            # `Test Files 1 failed`，于是去修实现 —— 而该修的是测试文件的导入。issue #49。
+            # 注意不能放在 Exit Code 行**之前**：parse_test_results 取的是第一个
+            # `Exit Code:` 行，前面插文字会让它读错。
+            load_failure = test_results.describe_suite_load_failure(sections_text)
+            body = f"Exit Code: {batch_exit_code}\n\n"
+            if load_failure:
+                body += f"[ARC] {load_failure}\n\n"
+            body += sections_text
             if 124 in exit_codes:
                 body += (
                     "\n\n[ARC] At least one sub-batch did not finish within the command timeout "
