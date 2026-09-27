@@ -1,0 +1,68 @@
+{
+  "REQ-1-1-2-E2E-sign-in-existing-account-scenarios": {
+    "test_id": "REQ-1-1-2-E2E-sign-in-existing-account-scenarios",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-UI-sign-in-page",
+      "REQ-1-1-2-UI-account-menu",
+      "REQ-1-1-2-UI-session-context",
+      "REQ-1-1-2-UI-require-auth",
+      "REQ-1-1-2-UI-workspace-page",
+      "REQ-1-1-2-API-auth-client",
+      "REQ-1-1-2-API-auth-routes",
+      "REQ-1-1-2-FUNC-auth-service",
+      "REQ-1-1-2-DB-seed-default-account"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/auth_sign_in.spec.ts",
+    "passed": false,
+    "first_line": "import { expect, test } from '@playwright/test';",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-INTEGRATION-auth-routes-login-session": {
+    "test_id": "REQ-1-1-2-INTEGRATION-auth-routes-login-session",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-API-auth-routes",
+      "REQ-1-1-2-FUNC-auth-service"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/auth_sign_in_routes.test.js",
+    "passed": true,
+    "first_line": "import { afterAll, beforeAll, describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-INTEGRATION-sign-in-ui-session-chain": {
+    "test_id": "REQ-1-1-2-INTEGRATION-sign-in-ui-session-chain",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-UI-sign-in-page",
+      "REQ-1-1-2-UI-sign-in-form-hook",
+      "REQ-1-1-2-UI-session-context",
+      "REQ-1-1-2-UI-account-menu",
+      "REQ-1-1-2-UI-require-auth",
+      "REQ-1-1-2-UI-workspace-page",
+      "REQ-1-1-2-UI-app-routes",
+      "REQ-1-1-2-API-auth-client"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/sign_in_flow.test.tsx",
+    "passed": true,
+    "first_line": "import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-2-UNIT-auth-service-credentials-and-session": {
+    "test_id": "REQ-1-1-2-UNIT-auth-service-credentials-and-session",
+    "req_id": "REQ-1-1-2",
+    "interface_ids": [
+      "REQ-1-1-2-FUNC-auth-service",
+      "REQ-1-1-2-DB-seed-default-account",
+      "REQ-1-1-2-DB-users-sessions-schema"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/auth_sign_in_service.test.js",
+    "passed": true,
+    "first_line": "import { afterAll, beforeAll, describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  }
+}

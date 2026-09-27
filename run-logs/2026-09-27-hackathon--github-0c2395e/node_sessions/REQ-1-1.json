@@ -1,0 +1,24 @@
+{
+  "node_id": "REQ-1-1",
+  "phase_status": {
+    "design": "skipped",
+    "test": "skipped",
+    "implement": "pending"
+  },
+  "requirement_snapshot": {
+    "name": "Account Registration and Recovery",
+    "description": "The account-access page is the shared page used by unauthenticated users to register, sign in, and recover a password, with the frontend showing the appropriate form and submit button for each operation. The local product does not implement an email-verification page, email delivery, or an external verification-code service — successful registration directly stores a sign-in-capable account and marks its email as verified; successful sign-in only stores a new session and does not create a duplicate account; after submitting an email for password recovery, the page directly displays the fixed verification code `123456` and the password-reset form, and only the correct code together with a compliant new password updates the password of the same account. Registration, sign-in, and recovery pages must use visible labels to identify fields and submit actions; after failure, non-sensitive input is retained, while password and password-confirmation fields must not redisplay submitted values.",
+    "visual_reference": [],
+    "children_ids": [
+      "REQ-1-1-1",
+      "REQ-1-1-2",
+      "REQ-1-1-3"
+    ],
+    "dependencies": []
+  },
+  "recent_failure_summary": "",
+  "interfaces": [],
+  "materialized_files": [],
+  "test_artifacts": [],
+  "resume_context": {}
+}
