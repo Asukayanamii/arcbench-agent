@@ -78,11 +78,38 @@ async def ainvoke_stage_agent(
             )
             return stream_payload
 
-    result = await agent.ainvoke(
-        {"messages": [{"role": "user", "content": message}]},
-        context=context,
-        config=build_agent_config(thread_id),
-    )
+    # 这次回退调用原先**没有任何保护**：流式路径刚因为一次解析异常失败（见上面 except），
+    # 回退再失败时异常就直接穿到 core/workflow.py 的节点级处理，节点被判死 ——
+    # 实测 `IMPLEMENT raised for node REQ-1-2-2: JSONDecodeError: ...`（issue #51）。
+    #
+    # 降级成「返回一个说明性的 payload」而不是抛：session 会正常结束、且没有调用过
+    # run_tests，于是 core/phases.py 的空 session 重试（issue #46）会接手，换一次全新尝试。
+    # 一次偶发的 SDK 解析失败因此从「节点必红」变成「重试一次」。
+    try:
+        result = await agent.ainvoke(
+            {"messages": [{"role": "user", "content": message}]},
+            context=context,
+            config=build_agent_config(thread_id),
+        )
+    except Exception as exc:
+        await _emit_log(
+            log_cb,
+            run_label,
+            f"agent invocation failed: {type(exc).__name__}: {exc}. "
+            "Returning a degraded payload so the stage can retry instead of dying.",
+            status="warning",
+            node_id=context.node_id,
+        )
+        log_to_logger(
+            logger, "AGENT_CALL_FAILED", label=run_label, thread_id=thread_id, body=f"{type(exc).__name__}: {exc}"
+        )
+        return {
+            "summary": (
+                f"The agent invocation failed before producing a result: {type(exc).__name__}: {exc}. "
+                "This is an infrastructure failure, not a judgement on the implementation."
+            ),
+            "_agent_call_failed": f"{type(exc).__name__}: {exc}",
+        }
     await _log_completed_tool_batches(log_cb, result, label=run_label, node_id=context.node_id)
     await _log_agent_trace(log_cb, result, label=run_label, thread_id=thread_id, node_id=context.node_id)
     payload = extract_payload(result)

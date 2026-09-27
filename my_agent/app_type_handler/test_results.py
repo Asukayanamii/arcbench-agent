@@ -89,22 +89,38 @@ def describe_suite_load_failure(output: str) -> str:
         return ""
 
     detail = ""
+    importer = ""
     for line in text.splitlines():
         stripped = line.strip()
         if stripped.startswith("Error:"):
             detail = stripped[:300]
+        if "Failed to resolve import" in stripped:
+            # `Failed to resolve import "<spec>" from "<importer>"` —— 把出问题的那个文件
+            # 抠出来，好在下面说清「相对路径是相对它自己所在目录算的」。
+            match = re.search(r'from\s+"([^"]+)"', stripped)
+            if match:
+                importer = match.group(1).strip()
+            if not detail:
+                detail = stripped[:300]
+        if detail and importer:
             break
-    if not detail:
-        for line in text.splitlines():
-            if "Failed to resolve import" in line or "Failed to load" in line:
-                detail = line.strip()[:300]
-                break
+
+    hint = ""
+    if importer or "Failed to resolve import" in text:
+        hint = (
+            "\nRelative imports resolve from the importing file's OWN directory, so re-check the "
+            "`../` count against the layout"
+            + (f" (`{importer}` lives under the test directory, while the module it needs is usually "
+               "a sibling of that directory)" if importer else "")
+            + ". A generated test very often gets this one level wrong."
+        )
 
     return (
         "The test suite failed to LOAD - zero tests were executed, so this is NOT an assertion "
         "failure and the implementation has not been disproved. Fix the TEST FILE (imports, paths, "
         "or test configuration) before touching the implementation."
         + (f"\nFirst error: {detail}" if detail else "")
+        + hint
     )
 
 

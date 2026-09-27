@@ -1324,6 +1324,9 @@ def check_suite_load_failure_is_distinguishable() -> None:
     check("it tells the caller to fix the TEST FILE", "Fix the TEST FILE" in note)
     check("it quotes the first Error: line",
           "Failed to resolve import" in note, note[:160])
+    check("it points at the relative-path depth (the real generator defect)",
+          "`../` count" in note and "tests/workbookListView.test.tsx" in note,
+          "the agent is told to fix the test file but not which direction to look")
 
     assertion_failure = (
         " Test Files  1 failed (1)\n"
@@ -1380,6 +1383,18 @@ def check_host_exceptions_are_distinguishable_from_failures() -> None:
           "a reader still cannot tell how many failures were ours vs the agent's")
     check("it says they are not a pass-rate signal",
           "not a pass-rate signal" in cli)
+
+    # #51 的第二半：回退到 ainvoke 的那次调用原先没有保护，异常直接穿到节点级处理。
+    runners = (REPO / "agents" / "runtime" / "runners.py").read_text(encoding="utf-8", errors="replace")
+    marker = "result = await agent.ainvoke("
+    check("the non-streaming fallback exists", marker in runners)
+    if marker in runners:
+        before = runners[max(0, runners.index(marker) - 700) : runners.index(marker)]
+        check("it is wrapped so a failure degrades instead of killing the node",
+              "try:" in before,
+              "an exception here reaches workflow.py and the node is marked FAILED")
+        check("the degraded payload says it was an infrastructure failure",
+              "_agent_call_failed" in runners)
 
 
 def main() -> int:
