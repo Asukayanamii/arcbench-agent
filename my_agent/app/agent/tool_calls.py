@@ -24,6 +24,7 @@ from langgraph.types import Command
 from app.agent.messages import error_message, text_of
 from app.agent.runtime import current_workspace
 from app.agent.tools import APPROVAL_REQUIRED, TOOLS
+from app.agent.tools.todo import reduce_todos
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +99,8 @@ async def run_tools(state: MessagesState):
             for key, value in command_update.items():
                 if key == "messages":
                     update.setdefault("messages", []).extend(value or [])
+                elif key == "todo_list":
+                    update[key] = reduce_todos(update.get(key), value)
                 else:
                     update[key] = value
         else:
@@ -189,6 +192,8 @@ async def run_calls(
                 for key, value in (result.update or {}).items():
                     if key == "messages":
                         current_state[key] = [*(current_state.get(key) or []), *(value or [])]
+                    elif key == "todo_list":
+                        current_state[key] = reduce_todos(current_state.get(key), value)
                     else:
                         current_state[key] = value
         return results

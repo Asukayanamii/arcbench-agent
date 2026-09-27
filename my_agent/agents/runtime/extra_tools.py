@@ -21,10 +21,10 @@ EXTRA_TOOLS_BY_STAGE: dict[str, tuple[str, ...]] = {
 
 EXTRA_TOOL_DESCRIPTIONS: dict[str, str] = {
     "subagent": "delegate a focused read-only exploration and receive a short summary",
-    "add_todo": "start a pending implementation task",
-    "list_todo": "pull the current todo list and progress",
-    "update_todo": "update one todo task or its progress",
-    "complete_todo": "mark one todo task completed",
+    "add_todo": "start a pending implementation task; call list_todo when the full list is needed",
+    "list_todo": "pull the complete todo list and progress",
+    "update_todo": "update one todo task or its progress; call list_todo when the full list is needed",
+    "complete_todo": "mark one todo task completed; call list_todo when the full list is needed",
 }
 
 

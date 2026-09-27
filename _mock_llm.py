@@ -34,7 +34,8 @@ def _decide(messages: list[dict], tool_names: list[str]) -> tuple[str, list[dict
     """Return (assistant_text, tool_calls)."""
 
     joined = "\n".join(_text_of(m) for m in messages)
-    already_called_tool = any(m.get("role") == "tool" for m in messages)
+    tool_messages = [m for m in messages if m.get("role") == "tool"]
+    already_called_tool = bool(tool_messages)
 
     if "Implementation probe." in joined and "add_todo" in tool_names:
         if not already_called_tool:
@@ -45,6 +46,21 @@ def _decide(messages: list[dict], tool_names: list[str]) -> tuple[str, list[dict
                     "function": {
                         "name": "add_todo",
                         "arguments": json.dumps({"task_desc": "mock implementation task"}),
+                    },
+                }
+            ]
+        if "list_todo" in tool_names and not any(
+            isinstance(message.get("content"), str)
+            and message["content"].lstrip().startswith("[")
+            for message in tool_messages
+        ):
+            return "", [
+                {
+                    "id": "call_list_todo_1",
+                    "type": "function",
+                    "function": {
+                        "name": "list_todo",
+                        "arguments": json.dumps({}),
                     },
                 }
             ]
