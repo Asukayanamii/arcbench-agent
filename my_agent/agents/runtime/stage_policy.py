@@ -86,6 +86,27 @@ class StageDiscipline:
                 self._design_write_count += 1
             self._written_paths.add(path)
 
+    def note_blocked(self, name: str, args: dict[str, Any]) -> None:
+        """被纪律拦下的调用也要留下痕迹：把**该路径**记进 `_failed_paths`。
+
+        守卫的拦截消息写着「Wait for a file-operation or system-validation error before
+        changing it again」—— 而被拦**就是**一次文件操作错误。原先 `_guard_tool.runner`
+        在拦截时直接 return，从不调用 `record`，于是路径进不了 `_failed_paths`；
+        `_validation_failed` 又只在验证工具失败时置位，而 `test_generation` 在 `check()`
+        里被明确禁止调用验证工具。
+
+        两条叠加 → **TestGenerator 写过的路径永久锁死，第一次写就是最终稿，改不回来**。
+        线上比赛实测：一个测试文件被 "Repeated write blocked" 拦了 **1142 次**，整轮
+        烧掉 201 分钟（`run-logs/2026-09-27-competition-hackathon--sheet-bs`）。
+
+        只记当前路径，**不置 `_validation_failed`** —— 后者是整阶段解锁，语义不同，
+        不该被一次普通的写入拦截顺手打开。
+        """
+
+        path = _discipline_path(args)
+        if path:
+            self._failed_paths.add(path)
+
     def _validate_read(self, args: dict[str, Any]) -> str | None:
         path = _discipline_path(args)
         if not path:
@@ -154,6 +175,9 @@ def _guard_tool(tool: BaseTool, discipline: StageDiscipline) -> BaseTool:
     async def runner(**kwargs: Any) -> str:
         blocked = discipline.check(name, kwargs)
         if blocked is not None:
+            # 拦截本身就是一次"文件操作错误"，必须记账 —— 否则被拦的路径永远解不开，
+            # 而测试生成阶段又没有验证工具能触发整阶段解锁。见 note_blocked。
+            discipline.note_blocked(name, kwargs)
             return f"{BLOCKED_PREFIX}{blocked}"
         args = discipline.bounded_args(name, kwargs)
         try:

@@ -1174,6 +1174,70 @@ def check_engine_state_dir_is_not_searchable() -> None:
     check("find enumerates through walk_files", "walk_files(" in find_src)
 
 
+def check_a_blocked_write_unlocks_its_path() -> None:
+    """被纪律拦下的写入必须让**该路径**解锁，否则测试生成阶段会永久锁死（issue #43）。
+
+    线上比赛实测（`run-logs/2026-09-27-competition-hackathon--sheet-bs`，201 分钟）：
+    一个测试文件被 "Repeated write blocked" 拦了 **1142 次**，占全部拦截的 98.7%。
+
+    死锁的构造：
+    1. `_guard_tool.runner` 在拦截时**直接 return，从不调用 record** → 路径进不了 `_failed_paths`
+    2. `_path_unlocked` = `_validation_failed or path in _failed_paths`
+    3. `_validation_failed` 只由**验证工具失败**置位，而 `check()` 明确禁止
+       `test_generation` 调用验证工具
+
+    → TestGenerator 写过的路径**永久锁死，第一次写就是最终稿**。而守卫的拦截消息
+    却写着「Wait for a file-operation or system-validation error」—— 被拦恰恰就是
+    一次文件操作错误，承诺与实现相反。
+
+    这条检查直接构造那个场景：写一次 → 被拦 → **再写必须放行**。
+    """
+
+    print()
+    print("--- a blocked write unlocks its path ---")
+
+    from agents.runtime import stage_policy  # noqa: PLC0415
+
+    args = {"file_path": "/frontend/tests/workbook-rename.integration.test.tsx"}
+    path = stage_policy._discipline_path(args)
+
+    discipline = stage_policy.StageDiscipline(stage="test_generation")
+
+    check("the first write is allowed", discipline.check("write_file", args) is None)
+    discipline.record("write_file", args, ok=True)
+
+    blocked = discipline.check("write_file", args)
+    check("the second write is blocked (the rule still exists)",
+          blocked is not None and "Repeated write" in blocked, f"got {blocked!r}")
+
+    # 关键：被拦之后必须解锁 —— 否则就是线上那 1142 次循环。
+    discipline.note_blocked("write_file", args)
+    check("after being blocked, the same path can be written again",
+          discipline.check("write_file", args) is None,
+          "the deadlock is back: this path can never be corrected")
+    # 注意：这个阶段还要求路径必须是**测试资产**（另一条规则），所以这里要用测试文件形态的
+    # 路径。我第一版随手写了 /other.tsx，被那条规则拦下，断言误报成 FAIL。
+    check("a test asset that was never blocked stays writable",
+          discipline.check("write_file", {"file_path": "/frontend/tests/other.test.tsx"}) is None)
+    check("note_blocked does NOT unlock the whole stage",
+          discipline._validation_failed is False,
+          "a plain write block must not flip the stage-wide unlock")
+    check("the blocked path is the one recorded as failed",
+          path in discipline._failed_paths, f"failed_paths={sorted(discipline._failed_paths)}")
+
+    # 说明为什么这个阶段没法靠验证解锁：它被明确禁止调验证工具。
+    validation_block = discipline.check("run_tests", {})
+    check("test_generation is still forbidden from running validation",
+          validation_block is not None, f"got {validation_block!r}")
+
+    source = (REPO / "agents" / "runtime" / "stage_policy.py").read_text(encoding="utf-8", errors="replace")
+    runner_start = source.index("async def runner(")
+    guard_body = source[runner_start : source.index("args = discipline.bounded_args", runner_start)]
+    check("the guard records the block instead of returning silently",
+          "note_blocked(" in guard_body,
+          "removing it would restore the 1142-retry deadlock")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1193,6 +1257,7 @@ def main() -> int:
     check_install_requests_dev_dependencies()
     check_a_passed_layer_is_not_rerun()
     check_engine_state_dir_is_not_searchable()
+    check_a_blocked_write_unlocks_its_path()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()
