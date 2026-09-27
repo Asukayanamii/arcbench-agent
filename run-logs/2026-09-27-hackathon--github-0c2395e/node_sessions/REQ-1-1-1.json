@@ -1,0 +1,355 @@
+{
+  "node_id": "REQ-1-1-1",
+  "phase_status": {
+    "design": "completed",
+    "test": "completed",
+    "implement": "completed"
+  },
+  "requirement_snapshot": {
+    "name": "Register a New GitHub Account",
+    "description": "The registration page is the form opened by the unique link named “Create an account” from the sign-in page. The form contains exactly one textbox labeled “Username”, one textbox labeled “Email”, one password input labeled “Password”, one password input labeled “Confirm password”, one initially unchecked checkbox named “Agree to the terms”, and one enabled button named “Create account”. The username and email identify the account, while passwords must not be echoed on the page. This product directly marks the email of a successfully registered account as verified and does not provide a subsequent email-verification page. The visitor enters a unique username, email, password, and matching confirmation, checks “Agree to the terms”, and activates “Create account”. The username must consist of 1 to 39 lowercase ASCII letters, digits, or single hyphens (`-`) and must not begin or end with a hyphen; after trimming leading and trailing whitespace, the email must contain exactly one `@`, be no longer than 254 characters, and have at least one dot and non-empty domain labels after the `@`; the password must contain 12 to 128 characters, include at least one uppercase letter, one lowercase letter, one digit, and one non-alphanumeric special character, and contain no whitespace characters. The system stores a sign-in-capable account together with its verified-email status and enters the sign-in page; if the username or email conflicts, any field is missing, the email format is invalid, the terms are not accepted, the password is noncompliant, or the confirmation does not match, the system retains the username and email input, displays an itemized message beside the corresponding field, and does not create an account. The corresponding visible field message contains “Username already exists”, “Username format is invalid”, “Email format is invalid”, “Password requirements are not satisfied”, or “Agree to terms is required”, as applicable. Visitors can use this capability on the account-access page. The system validates input rules, displays field errors, and prevents duplicate accounts; on success, it directly creates an available account. Submitting several invalid fields together must show the username, email, password, and missing-terms messages together, rather than revealing only one error per submission; the submit button remains actionable so these messages can be read. For example, a username beginning with a hyphen, email “not-an-email”, password “short”, confirmation “different”, and unchecked terms produce these field errors and preserve the attempted username. A duplicate username paired with a different unused email displays “Username already exists” and retains both attempted values. A successful registration accepts a unique username such as “pw-user-<unique suffix>”, its “@example.test” email, and password “Valid-password-123!”; the sign-in form is immediately available, accepts that email, and the resulting signed-in username remains visible after reload.\n\nScreenshot reference:\n![image](reference/github-sign-up.png)",
+    "visual_reference": [],
+    "children_ids": [],
+    "dependencies": []
+  },
+  "recent_failure_summary": "",
+  "interfaces": [
+    {
+      "interface_id": "REQ-1-1-1-DB-users-sessions-schema",
+      "req_id": "REQ-1-1-1",
+      "type": "DB",
+      "name": "AuthSchemaUsersAndSessions",
+      "file_path": "backend/src/database/init_db.js",
+      "first_line": "async function initializeDatabase(options = {}) {",
+      "responsibility": "Idempotent schema lifecycle for the account and session tables that back registration and sign-in.",
+      "specification": "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL, username_lower TEXT NOT NULL UNIQUE, email TEXT NOT NULL, email_lower TEXT NOT NULL UNIQUE, email_verified INTEGER NOT NULL DEFAULT 0, password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP) and CREATE TABLE IF NOT EXISTS sessions (id INTEGER PRIMARY KEY AUTOINCREMENT, token TEXT NOT NULL UNIQUE, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, expires_at TEXT NOT NULL). Declared inside initializeDatabase so every startup and every isolated test DB created through createTestDatabaseHarness() gets the same schema. username_lower/email_lower hold lowercased identity values so duplicate detection is case-insensitive while the original casing round-trips to the UI. email_verified must be set to 1 immediately on registration (no separate verification step). Password material is stored only as password_hash; nothing may echo it back. Schema evolution must stay append-only and guarded.",
+      "inputs": [
+        "optional { dbPath, reset } options passed by app bootstrap or test harness"
+      ],
+      "outputs": [
+        "Promise<sqlite3.Database> resolved after users and sessions exist"
+      ],
+      "callers": [
+        "backend/src/app.js initialization",
+        "backend/src/database/db_runtime.js (initializeDatabase before each query)",
+        "backend/src/database/seed_db.js",
+        "backend/src/database/test_harness.js"
+      ],
+      "callees": [
+        "sqlite3 verbose driver"
+      ],
+      "test_focus": [
+        "Tables exist after initializeDatabase on a fresh DB and after a second call (idempotent)",
+        "username_lower and email_lower uniqueness rejects duplicate inserts",
+        "sessions.user_id FK cascades on user delete"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-DB-seed-default-account",
+      "req_id": "REQ-1-1-1",
+      "type": "DB",
+      "name": "seedDatabaseAuthAccount",
+      "file_path": "backend/src/database/seed_db.js",
+      "first_line": "async function seedDatabase() {",
+      "responsibility": "Deterministic, idempotent bootstrap of the pre-existing sign-in-capable account used by the scenarios.",
+      "specification": "Extend the existing seedDatabase() transaction (do not add one-off connection helpers) so that startup seeding guarantees a pre-existing account: username `alice-dev`, email `alice.dev@example.test`, password `Valid-password-123!`, email_verified = 1. Implement it by delegating to auth_service.ensureVerifiedAccount({ username, email, password }) inside the existing withTransaction callback so the row is created through the same hashing path as registration and is immediately sign-in capable; keep it idempotent (INSERT OR IGNORE / upsert on username_lower and email_lower) so repeated seeds and repeated resets converge to the same single row and never duplicate or overwrite a conflicting user-created account. No frontend constant, fallback array, or test-only endpoint may substitute for this path. The seed must run before E2E and through the normal backend startup path, and must be reachable through GET /api/auth/session and POST /api/auth/login.",
+      "inputs": [
+        "none (reads its own fixed account definition)"
+      ],
+      "outputs": [
+        "Promise<void>; resolves after committing the seeded verified account"
+      ],
+      "callers": [
+        "backend/src/database/test_harness.js (seedDefault)",
+        "backend/src/database/index.js consumers",
+        "node backend/src/database/seed_db.js CLI entry"
+      ],
+      "callees": [
+        "backend/src/database/db_runtime.js withTransaction",
+        "backend/src/services/auth_service.js ensureVerifiedAccount"
+      ],
+      "test_focus": [
+        "Seeding twice leaves exactly one user row for alice-dev",
+        "The seeded account signs in with Valid-password-123! and reports emailVerified true",
+        "Seeded password is never returned in any API payload"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-FUNC-auth-service",
+      "req_id": "REQ-1-1-1",
+      "type": "FUNC",
+      "name": "authService",
+      "file_path": "backend/src/services/auth_service.js",
+      "first_line": "async function validateRegistrationInput(input) {",
+      "responsibility": "Authoritative account rules, registration persistence, credential verification, and session lifecycle for the auth chain.",
+      "specification": "Exports USERNAME_PATTERN (1-39 chars, lowercase ASCII letters/digits/single hyphens, no leading or trailing hyphen), USERNAME_MAX_LENGTH 39, PASSWORD_MIN_LENGTH 12, PASSWORD_MAX_LENGTH 128, EMAIL_MAX_LENGTH 254, SESSION_TTL_MS, PASSWORD_PATTERNS, FIELD_MESSAGES, RegistrationError, and the functions below. validateRegistrationInput(input) returns a fieldErrors object keyed by username/email/password/confirmPassword/terms and must evaluate every rule before returning (no early exit) so multiple messages appear together. registerUser(input) throws RegistrationError(fieldErrors) whose fieldErrors include 'Username already exists' for a taken username and 'Email exists'/'Email already exists' for a taken email; on success it inserts one users row with email_verified = 1 and a strong password_hash and returns the public user projection (id, username, email, emailVerified), never the hash. authenticateUser({ email, password }) resolves the row by email_lower and returns the public user or null; it must accept the email or the username as the identifier. createSessionForUser(userId) creates a sessions row with an unguessable token and expiry derived from SESSION_TTL_MS. getSessionUser(token) returns the linked user (or null for missing/expired tokens) and is the single source for GET /api/auth/session. destroySession(token) deletes the row. ensureVerifiedAccount({ username, email, password }) is the idempotent bootstrap used by seed_db. hashPassword/verifyPassword must be salted and never log or echo plaintext; validation messages must match the required strings exactly: 'Username already exists', 'Username format is invalid', 'Email format is invalid', 'Password requirements are not satisfied', 'Agree to terms is required'.",
+      "inputs": [
+        "RegistrationInput { username, email, password, confirmPassword, terms }",
+        "SignInInput { identifier|email, password }",
+        "session token string",
+        "bootstrap account { username, email, password }"
+      ],
+      "outputs": [
+        "fieldErrors: Record<string, string>",
+        "PublicUser { id, username, email, emailVerified: true }",
+        "{ token, ttlMs }",
+        "PublicUser | null",
+        "Promise<void>"
+      ],
+      "callers": [
+        "backend/src/routes/auth_routes.js",
+        "backend/src/database/seed_db.js"
+      ],
+      "callees": [
+        "backend/src/database/db_runtime.js run/get/all",
+        "node:crypto for password hashing and token generation"
+      ],
+      "test_focus": [
+        "Aggregate field errors for username '-bad', email 'not-an-email', password 'short', confirmPassword 'different', terms false all appear in one response",
+        "Duplicate username with a fresh email yields 'Username already exists' and creates no row",
+        "Successful registration stores email_verified = 1 and the password hash instead of plaintext",
+        "getSessionUser returns null for unknown or expired tokens"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-API-auth-routes",
+      "req_id": "REQ-1-1-1",
+      "type": "API",
+      "name": "authRoutes",
+      "file_path": "backend/src/routes/auth_routes.js",
+      "first_line": "const router = express.Router();",
+      "responsibility": "HTTP boundary for registration, sign-in, session restore, and sign-out, mounted under /api/auth.",
+      "specification": "Express router registered in backend/src/app.js via app.use('/api/auth', require('./routes/auth_routes')). Exports SESSION_COOKIE_NAME = 'arc_session' (httpOnly, sameSite lax, path '/') and REGISTRATION_FIELDS = ['username','email','password','confirmPassword','terms']. Contract: POST /register -> 201 { user: { id, username, email, emailVerified }, session: { token } } and sets the session cookie; 400 { message, fieldErrors } for validation failures; 409 { message, fieldErrors } for username/email conflicts. POST /login -> 200 { user, session: { token } } with cookie, 401 { message, fieldErrors } on bad credentials. GET /session -> 200 { user } when the cookie resolves to a live session, 401 { message } otherwise. POST /logout -> 204 and clears the cookie. Password values must never appear in any response body or log line; error payloads must carry every failing field at once so the page can render them together.",
+      "inputs": [
+        "JSON body for /register and /login",
+        "arc_session cookie for /session and /logout"
+      ],
+      "outputs": [
+        "JSON { user, session } | { message, fieldErrors } | 204"
+      ],
+      "callers": [
+        "frontend/src/api/authClient.ts (via axios /api prefix)",
+        "backend/test-e2e and backend/tests supertest suites"
+      ],
+      "callees": [
+        "backend/src/services/auth_service.js"
+      ],
+      "test_focus": [
+        "POST /api/auth/register returns all failing fieldErrors in a single 400",
+        "Successful registration returns a verified user and a cookie usable by GET /api/auth/session",
+        "No response payload or log contains the submitted password"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-API-auth-client",
+      "req_id": "REQ-1-1-1",
+      "type": "API",
+      "name": "authClient",
+      "file_path": "frontend/src/api/authClient.ts",
+      "first_line": "export async function registerAccount(input: RegisterAccountInput): Promise<RegisterAccountResult>",
+      "responsibility": "Typed frontend HTTP boundary for registration, sign-in, session restore, and sign-out.",
+      "specification": "Uses the shared axios instance from frontend/src/api/index.ts (baseURL '/api', withCredentials enabled so the session cookie round-trips). Exports SessionUser, AuthFieldErrors, AuthRequestError (carries status and fieldErrors), RegisterAccountInput { username, email, password, confirmPassword, terms }, SignInInput { email, password }. registerAccount() posts to /auth/register, resolves { user } on success, and throws AuthRequestError populated from the 400/409 fieldErrors payload so the form can render every message beside its field. signIn() posts to /auth/login. fetchCurrentUser() gets /auth/session and resolves null on 401 (unauthenticated) while rethrowing other failures. signOut() posts /auth/logout. No business rules are duplicated here; the server stays authoritative.",
+      "inputs": [
+        "RegisterAccountInput",
+        "SignInInput",
+        "no args for session/logout"
+      ],
+      "outputs": [
+        "Promise<RegisterAccountResult>",
+        "Promise<SignInResult>",
+        "Promise<SessionUser | null>",
+        "Promise<void>",
+        "throws AuthRequestError with fieldErrors"
+      ],
+      "callers": [
+        "frontend/src/features/auth/useRegistrationForm.ts",
+        "frontend/src/features/auth/SessionContext.tsx"
+      ],
+      "callees": [
+        "frontend/src/api/index.ts",
+        "backend /api/auth/* routes"
+      ],
+      "test_focus": [
+        "registerAccount maps a 400 fieldErrors payload onto AuthRequestError.fieldErrors",
+        "fetchCurrentUser resolves null on 401 instead of throwing",
+        "registerAccount never returns or logs the password"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-UI-session-context",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "SessionProviderAndUseSession",
+      "file_path": "frontend/src/features/auth/SessionContext.tsx",
+      "first_line": "export function SessionProvider({ children }: { children: ReactNode }) {",
+      "responsibility": "Global authenticated-state source of truth consumed by chrome, route guards, and pages.",
+      "specification": "Provides { status: 'loading' | 'authenticated' | 'unauthenticated', user: SessionUser | null, signIn, signOut, refresh }. On mount it restores the session through authClient.fetchCurrentUser(), resolves 'loading' in all outcomes (including network failure, which falls back to unauthenticated), and re-reads on refresh() so the signed-in username survives a browser reload. signIn() and signOut() update this shared state and never keep a page-local copy of the user. Must be mounted above the router in frontend/src/main.tsx so every route and the header read the same state.",
+      "inputs": [
+        "children",
+        "SignInInput for signIn()"
+      ],
+      "outputs": [
+        "SessionContextValue { status, user, signIn, signOut, refresh }"
+      ],
+      "callers": [
+        "frontend/src/main.tsx (provider mount)",
+        "frontend/src/pages/RegisterPage.tsx",
+        "sign-in page and any authenticated chrome/route guard"
+      ],
+      "callees": [
+        "frontend/src/api/authClient.ts fetchCurrentUser/signIn/signOut"
+      ],
+      "test_focus": [
+        "Status starts loading then settles to unauthenticated with a 401 restore",
+        "After a successful sign-in status is authenticated and user.username is exposed",
+        "useSession outside the provider throws a clear error"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-UI-register-form-hook",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "useRegistrationForm",
+      "file_path": "frontend/src/features/auth/useRegistrationForm.ts",
+      "first_line": "export function useRegistrationForm(",
+      "responsibility": "Owns registration form values, per-field error state, and submission, preserving username/email on rejection.",
+      "specification": "Returns { values, fieldErrors, submitting, formError, setField, submit }. values includes username, email, password, confirmPassword, terms (terms initially false). submit() calls authClient.registerAccount, maps AuthRequestError.fieldErrors onto fieldErrors so username, email, password, confirmPassword, and terms messages can all render at once, leaves values untouched on failure, keeps the submit button actionable (submitting returns to false), and invokes onRegistered(values) on success. Password values are kept for submission only and never rendered as text.",
+      "inputs": [
+        "setField(field, value) from inputs",
+        "onRegistered callback supplied by RegisterPage"
+      ],
+      "outputs": [
+        "UseRegistrationFormResult { values, fieldErrors, submitting, formError, setField, submit }"
+      ],
+      "callers": [
+        "frontend/src/pages/RegisterPage.tsx"
+      ],
+      "callees": [
+        "frontend/src/api/authClient.ts registerAccount"
+      ],
+      "test_focus": [
+        "Rejected submit keeps values.username and values.email and exposes every returned fieldErrors entry",
+        "terms is false before interaction and true after checking",
+        "onRegistered is not called on a rejected submit"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-UI-auth-text-field",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "AuthTextField",
+      "file_path": "frontend/src/features/auth/AuthTextField.tsx",
+      "first_line": "export function AuthTextField({ label, name, error, id, ...inputProps }: AuthTextFieldProps) {",
+      "responsibility": "Reusable labelled input that pairs an accessible name with its inline field message.",
+      "specification": "Renders label, input, and (when error is present) a role=\"alert\" paragraph beside the field. prop `label` is the accessible name used by getByLabelText ('Username', 'Email', 'Password', 'Confirm password'); missing errors render nothing. Styling is Tailwind utility classes.",
+      "inputs": [
+        "label",
+        "name",
+        "error?",
+        "standard input attributes such as type, value, onChange, autoComplete"
+      ],
+      "outputs": [
+        "labelled input element plus optional inline error text"
+      ],
+      "callers": [
+        "frontend/src/pages/RegisterPage.tsx",
+        "sign-in page"
+      ],
+      "callees": [],
+      "test_focus": [
+        "getByLabelText('Username') resolves the User textbox",
+        "A supplied error renders the exact server message text"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-UI-register-page",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "RegisterPage",
+      "file_path": "frontend/src/pages/RegisterPage.tsx",
+      "first_line": "function RegisterPage() {",
+      "responsibility": "Registration form surface opened by the 'Create an account' link from the sign-in page.",
+      "specification": "Route '/register' in frontend/src/App.tsx. Renders exactly one textbox labeled 'Username', one textbox labeled 'Email', two password inputs labeled 'Password' and 'Confirm password', one initially unchecked checkbox named 'Agree to the terms', and one enabled button named 'Create account'. Password input type is password so no password is echoed on the page. Each field renders its own itemized message beside it (role=\"alert\") from useRegistrationForm.fieldErrors, including 'Username already exists', 'Username format is invalid', 'Email format is invalid', 'Password requirements are not satisfied', and 'Agree to terms is required'; multiple messages appear simultaneously and the submit button stays actionable. On success the page confirms registration in place, calls the shared session refresh, and enters the sign-in page so that form is immediately available; no email-verification page exists in this flow. On failure the attempted username and email remain in their inputs. Uses Tailwind classes consistent with the sign-up reference styling.",
+      "inputs": [
+        "user input via useRegistrationForm",
+        "route '/register' navigation from the sign-in page"
+      ],
+      "outputs": [
+        "submitted registration POST via useRegistrationForm",
+        "navigation to '/signin' on success"
+      ],
+      "callers": [
+        "frontend/src/App.tsx route registration",
+        "sign-in page 'Create an account' link"
+      ],
+      "callees": [
+        "frontend/src/features/auth/useRegistrationForm.ts",
+        "frontend/src/features/auth/AuthTextField.tsx",
+        "frontend/src/features/auth/SessionContext.tsx"
+      ],
+      "test_focus": [
+        "All required controls are present with the exact labels and the terms checkbox starts unchecked",
+        "Multi-field rejection shows username, email, password, and terms messages together while values.username is preserved",
+        "Successful registration with a 39-char username budget, '@example.test' email, and 'Valid-password-123!' reaches the sign-in page and no password text is visible"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    },
+    {
+      "interface_id": "REQ-1-1-1-UI-app-routes",
+      "req_id": "REQ-1-1-1",
+      "type": "UI",
+      "name": "AppRoutesRegistrationPageMount",
+      "file_path": "frontend/src/App.tsx",
+      "first_line": "function App() {",
+      "responsibility": "Makes the registration surface reachable through the app router without duplicating route trees.",
+      "specification": "Add a single <Route path=\"/register\" element={<RegisterPage />} /> to the existing <Routes> in frontend/src/App.tsx and wrap the router tree with SessionProvider in frontend/src/main.tsx so registration shares the global session state. Keep the existing '/' route and let the sign-in page remain the destination the registration page navigates to; do not create a nested or parallel router.",
+      "inputs": [
+        "browser location"
+      ],
+      "outputs": [
+        "rendered RegisterPage for /register"
+      ],
+      "callers": [
+        "frontend/src/main.tsx"
+      ],
+      "callees": [
+        "frontend/src/pages/RegisterPage.tsx"
+      ],
+      "test_focus": [
+        "Navigating to /register renders the registration form",
+        "The '/' home route still renders after adding the route"
+      ],
+      "_existing_req_ids": [],
+      "_existing_implemented": false
+    }
+  ],
+  "materialized_files": [
+    "backend/src/services/auth_service.js",
+    "backend/src/routes/auth_routes.js",
+    "backend/src/database/init_db.js",
+    "frontend/src/api/authClient.ts",
+    "frontend/src/features/auth/SessionContext.tsx",
+    "frontend/src/features/auth/useRegistrationForm.ts",
+    "frontend/src/features/auth/AuthTextField.tsx",
+    "frontend/src/pages/RegisterPage.tsx"
+  ],
+  "test_artifacts": [],
+  "resume_context": {}
+}

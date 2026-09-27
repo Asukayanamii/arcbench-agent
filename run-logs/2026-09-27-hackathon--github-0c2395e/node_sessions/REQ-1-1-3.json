@@ -1,0 +1,18 @@
+{
+  "node_id": "REQ-1-1-3",
+  "phase_status": {
+    "design": "pending",
+    "test": "pending",
+    "implement": "pending"
+  },
+  "requirement_snapshot": {
+    "name": "Recover Account Access Through a Verified Email",
+    "description": "The password-recovery page is opened by the link “Forgot password” on the sign-in page; the fixed code is displayed as a distinct visible text value exactly “123456”, not only embedded inside a longer instruction. “Email”, “Verification code”, “New password”, and “Confirm password” are associated field labels; “Send reset link” and “Reset password” are buttons. The recovery scenario uses a newly registered account, an unknown email, a compliant replacement such as “Replacement-password-456!”, and invalid code “000000”; failure leaves the registered account able to sign in with its old email/password. In this flow, the local system does not send email, generate a copyable reset link, or call an external verification-code service. After the visitor enters an address in the Email field and clicks “Send reset link”, the page directly switches to the next step of the same recovery flow, displays the fixed verification-code text “123456” for local demonstration only, and shows visibly labeled Verification code, New password, Confirm password fields and a “Reset password” button; the page must not require access to email. To prevent disclosure through the page of whether an account exists, both registered and unknown email addresses enter the same next step and display the same fixed verification code. The system atomically updates the credentials of that account only when the recovery context is associated with a registered email, the Verification code is character-for-character equal to “123456”, the new password complies with the password rules in REQ-1-1-1, and Confirm password matches it. If the verification code is wrong, the email is unknown, the password is noncompliant, or the confirmation does not match, the page explains the reason beside the corresponding field and does not modify any account; an incorrect verification code displays “Verification code is invalid”. After successful submission, the page directly displays “Password updated” and does not produce any email or link. This local verification code has no email-delivery, expiration, or one-time-link semantics. Password fields must not echo entered values.\n\nScreenshot reference:\n![image](reference/github-password-reset.png) ![image](reference/github-password-reset-1.png)",
+    "visual_reference": [],
+    "children_ids": [],
+    "dependencies": [
+      "REQ-1-1-1"
+    ]
+  },
+  "recent_failure_summary": ""
+}
