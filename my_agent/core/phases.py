@@ -592,6 +592,10 @@ class WorkflowPhaseRunner:
         output = ""
         session_count = 0
         max_sessions = max(1, TDD_RUN_TESTS_BUDGET * len(ordered_types))
+        # 每个层允许几次「session 结束了但一次 run_tests 都没调」。
+        # 这种 session 不动预算，所以重试是免费的；但不能无限重试（见下面那段的说明）。
+        empty_session_counts: dict[str, int] = {}
+        max_empty_sessions = 2
         for ordered_type in ordered_types:
             active_test_type = ordered_type
             previous_failure_summary = str(sessions.load_node_session(node_id).get("recent_failure_summary", "") or "")
@@ -640,16 +644,47 @@ class WorkflowPhaseRunner:
                 if used_after >= TDD_RUN_TESTS_BUDGET:
                     break
                 if used_after == used_before:
+                    # 这个 session 一次 run_tests 都没调 —— agent 只回了句计划就结束了
+                    # （实测：`"summary": "Implementation looks substantially present. Let me
+                    # check the shell components…"`，349 秒，零工具调用）。
+                    #
+                    # 原先这里直接 break，把「**从未被尝试过的层**」判成「没通过」，
+                    # 节点随即 IMPLEMENT failed。但此刻**预算一次都没动**（0/5），
+                    # max_sessions 允许 15 次而只用了 4 次 —— 再做一次 session 完全免费。
+                    # 而排名规则里 pass rate 是主导项：没被尝试 = 尝试后失败，得分一样。
+                    #
+                    # 所以先重试，并把「上一轮没跑测试」明确带进下一轮（原先那一轮完全
+                    # 不知道上一轮发生了什么）。但要防模型反复这样，同一层给有限次机会。
+                    empty_sessions = empty_session_counts.get(ordered_type, 0) + 1
+                    empty_session_counts[ordered_type] = empty_sessions
+                    if empty_sessions > max_empty_sessions:
+                        await self._log(
+                            "TestDrivenDeveloper",
+                            (
+                                f"`{ordered_type}` gave up after {empty_sessions - 1} consecutive session(s) "
+                                "that ended without calling run_tests; the layer was never actually attempted."
+                            ),
+                            status="error",
+                            node_id=node_id,
+                        )
+                        break
                     await self._log(
                         "TestDrivenDeveloper",
                         (
                             f"TDD agent session ended without calling run_tests for `{ordered_type}`; "
-                            "moving to the next scheduled layer with a fresh budget."
+                            f"retrying the same layer (budget untouched at {used_after}/{TDD_RUN_TESTS_BUDGET}, "
+                            f"empty session {empty_sessions}/{max_empty_sessions})."
                         ),
-                        status="error",
+                        status="warning",
                         node_id=node_id,
                     )
-                    break
+                    previous_failure_summary = (
+                        f"The previous session for `{ordered_type}` ended WITHOUT running any test, so this "
+                        f"layer has not been attempted yet (budget still {used_after}/{TDD_RUN_TESTS_BUDGET}). "
+                        "Call `run_tests` in this session before returning anything; a plan or status summary "
+                        "is not an action."
+                    )
+                    continue
             active_test_type = None
             if parse_test_results(result_by_type.get(ordered_type, "")).get("exit_code") != 0:
                 await self._log(

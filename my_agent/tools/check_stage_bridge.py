@@ -1238,6 +1238,56 @@ def check_a_blocked_write_unlocks_its_path() -> None:
           "removing it would restore the 1142-retry deadlock")
 
 
+def check_an_unattempted_layer_is_retried() -> None:
+    """一次「没动手」的 session 不能把整个节点判死（issue #44 之后的新问题）。
+
+    最新代码交的 sheet 题里 `REQ-1-1-1` 变红，收尾是：
+
+        TDD batch `E2E` did not pass after **0/5** run_tests call(s)
+        IMPLEMENT failed for node REQ-1-1-1.
+
+    `0/5` 说明这一层**一次都没跑过** —— agent 在那一层的最后一条消息是一句计划
+    （*"Let me check the shell components…"*），零工具调用就结束了 session。
+
+    原先 `used_after == used_before` 时直接 `break`，把「从未被尝试过的层」判成「没通过」。
+    但此刻**预算一次都没动**，`max_sessions` 也远未用尽 —— 重试完全免费。
+    而 pass rate 是评分主导项：没被尝试 = 尝试后失败，得分一样。
+
+    这条检查盯三件事：**重试而非判死**、**有次数上限**、**下一轮被告知上一轮没跑测试**。
+    层循环要驱动起来得搭整套 TDD 环境，所以这里断言源码结构而不是硬造一个假循环。
+    """
+
+    print()
+    print("--- an unattempted layer is retried ---")
+
+    source = (REPO / "core" / "phases.py").read_text(encoding="utf-8", errors="replace")
+
+    marker = "if used_after == used_before:"
+    check("the empty-session branch exists", marker in source)
+
+    if marker in source:
+        start = source.index(marker)
+        # 取这一段的正文：到下一个同级判断为止
+        rest = source[start:]
+        end = rest.find("\n            active_test_type = None")
+        branch = rest[: end if end != -1 else 2000]
+
+        check("the branch retries instead of concluding the layer",
+              "continue" in branch,
+              "a layer that was never attempted would be scored as failed")
+        check("it is bounded, so the model cannot loop forever",
+              "max_empty_sessions" in branch and "> max_empty_sessions" in branch)
+        check("giving up says WHY, not just did-not-pass",
+              "gave up after" in branch and "never actually attempted" in branch)
+        check("the retry tells the next session it ran no test",
+              "ended WITHOUT running any test" in branch,
+              "the next session would repeat the same non-action")
+        check("the retry is logged with the untouched budget",
+              "budget untouched at" in branch)
+
+    check("the bound is declared before the loop", "max_empty_sessions = 2" in source)
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1258,6 +1308,7 @@ def main() -> int:
     check_a_passed_layer_is_not_rerun()
     check_engine_state_dir_is_not_searchable()
     check_a_blocked_write_unlocks_its_path()
+    check_an_unattempted_layer_is_retried()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()
