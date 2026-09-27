@@ -69,3 +69,7 @@ new ticket log.txt
 
 # 比赛平台导出的原始 log：归档到 run-logs/ 之后就不该再留在仓库根目录
 bs log*.txt
+
+# 平台导出的比赛 log：各种命名都别提交，归档到 run-logs/ 就行
+new log*.txt
+new ticket log*.txt
