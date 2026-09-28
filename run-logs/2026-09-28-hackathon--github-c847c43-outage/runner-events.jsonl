@@ -1,0 +1,2 @@
+{"type": "signal", "reason": "traceability_store_initialized", "timestamp": "2026-09-28 09:26:44", "refresh": {"submission": true, "logs": false, "commit_history": false, "traceability_selected": true, "traceability_all": true, "preview": false}}
+{"type": "signal", "reason": "git_initialized", "timestamp": "2026-09-28 09:27:02", "refresh": {"submission": false, "logs": false, "commit_history": true, "traceability_selected": false, "traceability_all": false, "preview": false}}

@@ -1,0 +1,18 @@
+{
+  "node_id": "REQ-1-1-2",
+  "phase_status": {
+    "design": "pending",
+    "test": "pending",
+    "implement": "pending"
+  },
+  "requirement_snapshot": {
+    "name": "Sign In with an Existing Account",
+    "description": "This feature builds on the persisted objects, opened pages, or authenticated-session context provided by REQ-1-1-1 (Register a New GitHub Account); it must reuse that context and keep pages and data consistent after the context changes. The sign-in page is the form on the account-access page containing “Username or email”, “Password”, and “Sign in”. A “session” is the current-browser login record saved after successful account authentication, represented in the frontend by the upper-right account menu and access to protected pages. The visitor enters a username or email and a password and submits the form. The system looks up the account and validates its credentials and availability status; if authentication fails due to an unknown username/email, incorrect password, or unavailable account, the system displays exactly the same generic failure message “Invalid credentials”, does not disclose whether the account exists or which credential was wrong, and does not create a session. After successful authentication, the system stores a session with a unique session identifier, account identifier, and active status, then redirects to the workspace accessible to that user; the session remains valid after refreshing or reopening the workspace, and subsequent protected organization, repository, and work-item requests must use this session to determine the current user.\n\nScreenshot reference:\n![image](reference/github-sign-in.png)",
+    "visual_reference": [],
+    "children_ids": [],
+    "dependencies": [
+      "REQ-1-1-1"
+    ]
+  },
+  "recent_failure_summary": ""
+}

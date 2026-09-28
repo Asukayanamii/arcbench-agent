@@ -258,6 +258,167 @@ def check_path_keys_are_normalised() -> None:
         probe.unlink(missing_ok=True)
 
 
+def check_repeat_searches_are_served_from_the_cache() -> None:
+    """同一阶段内的同一个检索查询只回一次（issue #63 方案 A）。
+
+    一次受限运行里（`run-logs/2026-09-28-hackathon--github-01fcacc`）检索类调用占全部
+    工具调用的 21%，其中约四成是同一会话内的重复查询：`ls backend/src` 问过又问一遍、
+    `glob` 加不加 `path` 各问一遍。目录清单在一个阶段内是常量，重复问只是把同一份输出
+    再灌一次上下文，而且**每一次都是一整个模型往返**（要重发整段阶段历史）。
+
+    这里的关键是**同一批**：`run_calls` 把一批调用并发跑，只在成功后记账的缓存看不见
+    同批的孪生调用（实测那 55 次重复全部落在同一批里），所以两个缓存在 `check()` 放行时
+    就认领，失败时撤销。
+    """
+
+    print()
+    print("--- repeated searches are served from the cache ---")
+
+    discipline = stage_policy.StageDiscipline(stage="implementation")
+
+    check("the first ls is allowed",
+          discipline.check("ls", {"path": "/workspace/backend/src"}) is None)
+    blocked = discipline.check("ls", {"path": "/workspace/backend/src"})
+    check("the same ls in the same batch is blocked", blocked is not None, blocked or "")
+    check("the block tells the model to reuse the earlier result",
+          "Use the earlier result" in (blocked or ""), blocked or "")
+    check("another spelling of the same directory is the same query",
+          discipline.check("ls", {"path": "backend/src"}) is not None)
+    check("a different directory is not",
+          discipline.check("ls", {"path": "/workspace/backend/tests"}) is None)
+    check("a different tool is not the same query",
+          discipline.check("glob", {"pattern": "backend/src"}) is None)
+
+    spelling = stage_policy.StageDiscipline(stage="implementation")
+    check("glob without `path` is allowed",
+          spelling.check("glob", {"pattern": "frontend/tests/*"}) is None)
+    check("glob with `path: null` is the same query",
+          spelling.check("glob", {"pattern": "frontend/tests/*", "path": None}) is not None)
+    check("grep with `glob: null` equals `glob: ''`",
+          spelling.check("grep", {"pattern": "TODO", "path": "/workspace"}) is None
+          and spelling.check("grep", {"pattern": "TODO", "path": None, "glob": ""}) is not None)
+
+    retry = stage_policy.StageDiscipline(stage="implementation")
+    retry.check("ls", {"path": "/workspace/backend"})
+    retry.record("ls", {"path": "/workspace/backend"}, ok=False, content="Error: 目录不存在")
+    check("a search that errored can be retried",
+          retry.check("ls", {"path": "/workspace/backend"}) is None,
+          "the tool error must release the claim")
+
+    selfheal = stage_policy.StageDiscipline(stage="implementation")
+    selfheal.check("ls", {"path": "/workspace/backend"})
+    selfheal.check("ls", {"path": "/workspace/backend"})
+    selfheal.note_blocked("ls", {"path": "/workspace/backend"})
+    check("a blocked search does not become a hard loop",
+          selfheal.check("ls", {"path": "/workspace/backend"}) is None,
+          "a model that insists would burn a round-trip on every retry")
+
+    # 谁执行规则谁就得公布规则（与 render_stage_limits 的既有约定一致）。
+    limits = stage_policy.render_stage_limits("implementation")
+    check("the search cache is published in the stage limits",
+          "`ls` / `glob` / `grep`" in limits, limits.splitlines()[-1][:100])
+
+
+def check_a_failing_validation_does_not_switch_off_the_lookup_cache() -> None:
+    """一次测试失败不能把两个查询缓存整个关掉 —— 但写入侧必须照旧解锁。
+
+    实测（`run-logs/2026-09-28-hackathon--github-01fcacc`）：一次受限运行里同区间重复读
+    190 次（按事件计），守卫总共只拦下 **1** 次。原因是 TDD 会话**就是**由失败驱动的：
+    第一次 `run_tests` 报 `Exit Code: 1` 就把 `_validation_failed` 置上，而
+    `_path_unlocked` 从此对**任何**路径都返回真 —— 两个缓存一起停摆。
+
+    但「整阶段解锁」对**写入**是承重的（#4.14：一次失败之后必须能改，也必须能读回自己
+    刚写的文件；#43：没有验证工具的阶段靠 `note_blocked` 解锁）。所以这条检查同时钉住
+    两侧：缓存不再被无关的失败关掉，写入与「读回自己写过的文件」照旧解锁。
+    """
+
+    print()
+    print("--- a failing validation does not switch off the lookup cache ---")
+
+    discipline = stage_policy.StageDiscipline(stage="implementation")
+    read_args = {"file_path": "/workspace/backend/src/app.js"}
+    search_args = {"path": "/workspace/backend/src"}
+
+    check("the first read is allowed", discipline.check(workspace_tools.READ_TOOL_NAME, read_args) is None)
+    check("the first search is allowed", discipline.check("ls", search_args) is None)
+    discipline.record("run_tests", {}, ok=False, content="Runner: Vitest\nExit Code: 1\nFAIL x\n")
+
+    check("a failing run_tests still flags the stage",
+          discipline._validation_failed is True, "the write-side unlock depends on this")
+    check("a repeated read is still blocked afterwards",
+          discipline.check(workspace_tools.READ_TOOL_NAME, read_args) is not None,
+          "one failing test used to switch the whole read cache off")
+    check("a repeated search is still blocked afterwards",
+          discipline.check("ls", search_args) is not None)
+
+    # 写入侧的整阶段解锁照旧（#4.14 / #43）。用一份干净的状态验：上面那次失败已经把
+    # 整个阶段解锁了（那时"读回自己写的文件"本来就该放行）。
+    written = {"file_path": "/workspace/backend/src/owned.js", "content": "x"}
+    repair = stage_policy.StageDiscipline(stage="implementation")
+    repair.record("edit_file", written, ok=True)
+    check("the read-after-write gate holds while nothing failed",
+          repair.check(workspace_tools.READ_TOOL_NAME, written) is not None)
+    repair.record("run_tests", {}, ok=False, content="Runner: Vitest\nExit Code: 1\nFAIL x\n")
+    check("...and a failing validation still unlocks that read",
+          repair.check(workspace_tools.READ_TOOL_NAME, written) is None,
+          "#4.14: the agent must be able to read back what it wrote")
+    check("...and still unlocks the rewrite",
+          repair.check("write_file", written) is None,
+          "#43/#4.14: the repair path must stay open")
+
+
+def check_the_read_cache_records_the_window_the_tool_serves() -> None:
+    """守卫记账的区间必须等于工具**真正返回**的区间，否则合法的续读会被当成重叠拦下。
+
+    `read_file` 的 `limit` 上限是 `MAX_READ_LIMIT`(200)，而 `bounded_args` 原先拿**归一后的
+    键**去判 `startswith("/workspace/")` —— 归一已经把这个前缀去掉了，判定恒假，上限从没
+    生效：`read_file(path, limit=500)` 按 (0, 500) 记账，工具只返回 1-200 行，于是再读
+    `offset=200` 被判成"重叠"拦下，附一句"用之前的结果" —— 而 201-300 行从来没给过。
+
+    这条走**真的守卫外壳**（`guard_tools`），所以断言的是端到端行为：工具看到的参数、
+    以及拦不拦下一次续读。
+    """
+
+    print()
+    print("--- the read cache records the window the tool serves ---")
+
+    seen: list[dict] = []
+
+    async def fake_read_file(
+        file_path: str, offset: int | None = None, limit: int | None = None
+    ) -> str:
+        seen.append({"file_path": file_path, "offset": offset, "limit": limit})
+        return "line one\n"
+
+    discipline = stage_policy.StageDiscipline(stage="implementation")
+    tools = {
+        tool.name: tool
+        for tool in stage_policy.guard_tools(
+            [StructuredTool.from_function(coroutine=fake_read_file, name="read_file", description="read")],
+            discipline,
+        )
+    }
+
+    async def run() -> tuple[str, str]:
+        first = await tools["read_file"].ainvoke(
+            {"file_path": "/workspace/backend/src/big.js", "limit": 500}
+        )
+        second = await tools["read_file"].ainvoke(
+            {"file_path": "/workspace/backend/src/big.js", "offset": 200, "limit": 100}
+        )
+        return first, second
+
+    first, second = asyncio.run(run())
+
+    check("the tool is asked for at most MAX_READ_LIMIT lines",
+          bool(seen) and seen[0]["limit"] == stage_policy.MAX_READ_LIMIT,
+          f"tool saw {seen[0] if seen else None}")
+    check("the first read is served", not first.startswith(stage_policy.BLOCKED_PREFIX), first[:60])
+    check("a continuation past the served window is allowed",
+          not second.startswith(stage_policy.BLOCKED_PREFIX),
+          f"the guard billed {stage_policy.MAX_READ_LIMIT}..500 as if it had been delivered")
+
+
 def check_interface_contract_is_not_duplicated() -> None:
     """Ensure normal shared context does not repeat the full interface JSON."""
 
@@ -1560,6 +1721,9 @@ def main() -> int:
     check_skill_roots()
     check_pagination()
     check_path_keys_are_normalised()
+    check_repeat_searches_are_served_from_the_cache()
+    check_a_failing_validation_does_not_switch_off_the_lookup_cache()
+    check_the_read_cache_records_the_window_the_tool_serves()
     check_stage_limits_are_published()
     check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()

@@ -22,6 +22,10 @@ from agents.runtime.workspace_tools import (
 )
 
 VALIDATION_TOOL_NAMES = frozenset({"run_build", "run_tests"})
+# 检索类工具：输出在一个阶段内是常量（目录结构不会自己变），所以和 read cache 一样按
+# 「同一个查询只回一次」处理。`find` 目前没有暴露成工具（`glob` 内部用的是它），
+# 名字留在这里，免得以后加了它却漏在覆盖之外。
+SEARCH_TOOL_NAMES = frozenset({"find", "glob", "grep", "ls"})
 MAX_DESIGN_WRITES = 8
 MAX_SKELETON_LINES = 160
 
@@ -29,11 +33,20 @@ BLOCKED_PREFIX = "Error: ARC stage discipline: "
 
 
 class StageDiscipline:
-    """单次阶段调用的纪律状态。一次 stage run 一个实例，不跨阶段复用。"""
+    """单次阶段调用的纪律状态。一次 stage run 一个实例，不跨阶段复用。
+
+    **两个缓存在 `check()` 放行时就记账，不是等工具跑成功再记**：同一批工具调用是并发
+    执行的（`run_calls` 给每个调用建一个 task），只在成功后记账的话，同一批里的孪生调用
+    会**都**通过 `check()`、都去执行 —— 实测一次受限运行里 55 次重复查询**全部**落在同一批，
+    那种缓存在这批上等于不存在。失败（工具报错）时把这次认领撤销，所以「报错仍可重试」
+    这条规则不受影响。
+    """
 
     def __init__(self, *, stage: str) -> None:
         self.stage = stage
+        # 两个缓存里存的都是「已经问过的东西」：读用 (path, [start, end))，检索用查询键。
         self._read_ranges: dict[str, list[tuple[int, int]]] = {}
+        self._search_calls: set[str] = set()
         self._written_paths: set[str] = set()
         self._failed_paths: set[str] = set()
         self._validation_failed = False
@@ -50,15 +63,26 @@ class StageDiscipline:
             return self._validate_read(args)
         if name in WRITE_TOOL_NAMES:
             return self._validate_write(args)
+        if name in SEARCH_TOOL_NAMES:
+            return self._validate_search(name, args)
         return None
 
     def bounded_args(self, name: str, args: dict[str, Any]) -> dict[str, Any]:
-        """在工作区读取上强制分页上限，避免一次把大文件整个吞进上下文。"""
+        """在工作区读取上强制分页上限，避免一次把大文件整个吞进上下文。
+
+        ⚠️ 归一后的键（`_discipline_path`）**已经去掉了 `/workspace` 前缀**，所以「是不是
+        工作区里的读」不能用它来判断 —— 原先写的是 `path.startswith("/workspace/")`，
+        那是**恒假**的，上限从来没生效过：`read_file(path, limit=500)` 按 (0, 500) 记账，
+        而工具实际只返回 200 行（`MAX_READ_LIMIT`），于是合法的续读 `offset=200` 会被
+        判成重叠而拦下 —— 白白烧掉一个往返，守卫的理由还是错的。
+
+        技能库（`/skills/<名字>/SKILL.md`）由 `read_file` 整篇放行，忽略这两个参数，
+        所以这里一并按工作区口径处理即可。
+        """
 
         if name != READ_TOOL_NAME:
             return args
-        path = _discipline_path(args)
-        if not path.startswith("/workspace/"):
+        if not _discipline_path(args):
             return args
         bounded = dict(args)
         # offset 是"跳过的行数"（0 基），与 workspace_tools.read_file 一致。
@@ -68,23 +92,36 @@ class StageDiscipline:
 
     def record(self, name: str, args: dict[str, Any], *, ok: bool, content: str = "") -> None:
         path = _discipline_path(args)
+        key = _search_key(name, args)
         if name in VALIDATION_TOOL_NAMES:
             if not ok:
                 self._validation_failed = True
                 self._failed_paths.update(self._written_paths)
             return
         if not ok:
+            # 工具报错：撤销 `check()` 时的认领并解锁，这一路径 / 这一查询可以重试
+            # （与既有规则一致）。
+            self._release_read_claim(args)
+            if key:
+                self._search_calls.discard(key)
             if path:
                 self._failed_paths.add(path)
+            if key:
+                self._failed_paths.add(key)
             return
-        if name == READ_TOOL_NAME and path:
-            offset = _as_int(args.get("offset"), default=0, minimum=0)
-            limit = _as_int(args.get("limit"), default=100, minimum=1)
-            self._read_ranges.setdefault(path, []).append((offset, offset + limit))
         if name in WRITE_TOOL_NAMES and path:
             if path not in self._written_paths and self.stage == "interface_design":
                 self._design_write_count += 1
             self._written_paths.add(path)
+
+    def _release_read_claim(self, args: dict[str, Any]) -> None:
+        path = _discipline_path(args)
+        if not path:
+            return
+        window = _read_window(args)
+        claimed = self._read_ranges.get(path) or []
+        if window in claimed:
+            claimed.remove(window)
 
     def note_blocked(self, name: str, args: dict[str, Any]) -> None:
         """被纪律拦下的调用也要留下痕迹：把**该路径**记进 `_failed_paths`。
@@ -101,11 +138,16 @@ class StageDiscipline:
 
         只记当前路径，**不置 `_validation_failed`** —— 后者是整阶段解锁，语义不同，
         不该被一次普通的写入拦截顺手打开。
+
+        检索类工具同理：被拦的是**那一个查询**，不是整个搜索缓存。
         """
 
         path = _discipline_path(args)
         if path:
             self._failed_paths.add(path)
+        key = _search_key(name, args)
+        if key:
+            self._failed_paths.add(key)
 
     def _validate_read(self, args: dict[str, Any]) -> str | None:
         path = _discipline_path(args)
@@ -116,16 +158,39 @@ class StageDiscipline:
                 f"Read blocked: {path} was already written in this stage. Continue to the next action; "
                 "re-read only after a file-operation or system-validation error."
             )
-        offset = _as_int(args.get("offset"), default=0, minimum=0)
-        limit = min(_as_int(args.get("limit"), default=100, minimum=1), MAX_READ_LIMIT)
+        window = _read_window(args)
         previous = self._read_ranges.get(path, [])
-        if not previous or self._path_unlocked(path):
+        if previous and not self._cache_unlocked(path):
+            if any(_overlap(*window, start, end) for start, end in previous):
+                return (
+                    f"Repeated read blocked: {path} is already in this stage's read cache. "
+                    "Use the earlier result; only a non-overlapping paginated range or a failure may justify another read."
+                )
+        self._read_ranges.setdefault(path, []).append(window)
+        return None
+
+    def _validate_search(self, name: str, args: dict[str, Any]) -> str | None:
+        """同一个检索查询在一个阶段内只回一次（issue #63 方案 A）。
+
+        实测（`run-logs/2026-09-28-hackathon--github-01fcacc`）：一次受限运行里检索类调用
+        占全部工具调用的 21%（`ls` 34 次、`glob` 9 次、`grep` 4 次），其中约四成是同一会话内
+        的重复查询 —— 目录结构与匹配结果在一个阶段内基本是常量，重复跑只是把同一份输出
+        再灌一次上下文，而每一次都是一整个模型往返、且要重发整段阶段历史。
+        read cache 早就在拦重复读，检索类工具只是不在它的覆盖里。
+
+        不做「写过文件就作废检索缓存」：真要重列一次时，被拦的那一次本身就解锁了该查询
+        （`note_blocked`），代价至多一个往返。
+        """
+
+        key = _search_key(name, args)
+        if not key:
             return None
-        if any(_overlap(offset, offset + limit, start, end) for start, end in previous):
+        if key in self._search_calls and not self._cache_unlocked(key):
             return (
-                f"Repeated read blocked: {path} is already in this stage's read cache. "
-                "Use the earlier result; only a non-overlapping paginated range or a failure may justify another read."
+                f"Repeated {name} blocked: this exact query is already in this stage's search cache. "
+                "Use the earlier result; only a different query or a failure may justify another call."
             )
+        self._search_calls.add(key)
         return None
 
     def _validate_write(self, args: dict[str, Any]) -> str | None:
@@ -158,6 +223,20 @@ class StageDiscipline:
 
     def _path_unlocked(self, path: str) -> bool:
         return self._validation_failed or path in self._failed_paths
+
+    def _cache_unlocked(self, key: str) -> bool:
+        """重复读 / 重复检索的解锁：只看**这个键自己**有没有出过错。
+
+        不能跟着 `_validation_failed` 一起整阶段解锁。一次测试失败不会让已经拿到的文件内容
+        或目录清单变旧，但它会把两个缓存整个关掉 —— 而 TDD 阶段**就是**由失败驱动的：
+        实测一个会话里同区间重复读 190 次（`run-logs/2026-09-28-hackathon--github-01fcacc`），
+        守卫总共只拦下 1 次，就是被这个过宽的解锁吃掉的。
+
+        写入侧与「读回自己写过的文件」仍然用 `_path_unlocked` —— 那里整阶段解锁是承重的
+        （#4.14：一次失败之后必须能改，也必须能读回自己刚写的文件）。
+        """
+
+        return key in self._failed_paths
 
 
 def guard_tools(tools: Iterable[BaseTool], discipline: StageDiscipline) -> list[BaseTool]:
@@ -196,6 +275,18 @@ def _guard_tool(tool: BaseTool, discipline: StageDiscipline) -> BaseTool:
     )
 
 
+def _normalise_spelling(raw: Any) -> str:
+    """去掉虚拟根 `/workspace` 与 `./` 前缀，返回工作区相对写法（空串 = 没给路径）。"""
+
+    text = str(raw or "").replace("\\", "/").strip()
+    if text == WORKSPACE_PREFIX or text.startswith(f"{WORKSPACE_PREFIX}/"):
+        text = text[len(WORKSPACE_PREFIX) :]
+    text = text.lstrip("/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
+
+
 def _discipline_path(args: dict[str, Any]) -> str:
     """把工具参数里的路径归一成**同一个键**，好让去重真正生效。
 
@@ -205,15 +296,39 @@ def _discipline_path(args: dict[str, Any]) -> str:
     所以先把虚拟根前缀去掉再归一。
     """
 
-    raw = str(args.get("file_path", "") or "").replace("\\", "/").strip()
-    if not raw:
-        return ""
-    if raw == WORKSPACE_PREFIX or raw.startswith(f"{WORKSPACE_PREFIX}/"):
-        raw = raw[len(WORKSPACE_PREFIX) :]
-    raw = raw.lstrip("/")
-    while raw.startswith("./"):
-        raw = raw[2:]
+    raw = _normalise_spelling(args.get("file_path"))
     return f"/{raw}" if raw else ""
+
+
+def _read_window(args: dict[str, Any]) -> tuple[int, int]:
+    """把一次读折算成半开区间 `[start, end)`。offset 是"跳过的行数"（0 基）。
+
+    `check()` 与 `record()` 都要用同一个折算：前者认领、后者在失败时撤销认领，
+    两边算得不一样就会撤销失败，缓存里留下一条永远命中不了的账单。
+    """
+
+    offset = _as_int(args.get("offset"), default=0, minimum=0)
+    limit = min(_as_int(args.get("limit"), default=100, minimum=1), MAX_READ_LIMIT)
+    return offset, offset + limit
+
+
+def _search_key(name: str, args: dict[str, Any]) -> str:
+    """检索类查询的缓存键；非检索工具返回空串。
+
+    同一个查询的**不同写法必须共用一把键**，否则缓存等于没有 —— 模型两种都写：
+    `glob(pattern="frontend/tests/*")` 与 `glob(pattern="frontend/tests/*", path=None)`
+    各出现 2 次，`ls()` 与 `ls("/workspace")` 也是一回事。所以路径按 `_normalise_spelling`
+    归一，缺省 / `null` / `.` / `/workspace` 都落成同一个「工作区根」。
+    """
+
+    if name not in SEARCH_TOOL_NAMES:
+        return ""
+    base = _normalise_spelling(args.get("path"))
+    location = f"/{base}" if base and base != "." else "/"
+    parts = [name, str(args.get("pattern", "") or "").strip(), location]
+    if name == "grep":
+        parts.append(str(args.get("glob", "") or "").strip())
+    return "|".join(parts)
 
 
 def _tool_text(output: Any) -> str:
@@ -287,6 +402,8 @@ def render_stage_limits(stage: str) -> str:
         "an error for that path.",
         "File reads are paginated: `offset` is the number of lines to skip (0-based) and `limit` "
         "is how many lines to return. Do not re-read a range you already have.",
+        "Search results are cached per query: `ls` / `glob` / `grep` answer each distinct query "
+        "once in this stage. Reuse the earlier result instead of repeating the same call.",
         "Use only the file tools and the stage-specific tools listed above; `execute` and `delete` "
         "do not exist in this workflow.",
     ]
@@ -318,6 +435,7 @@ __all__ = [
     "BLOCKED_PREFIX",
     "MAX_DESIGN_WRITES",
     "MAX_SKELETON_LINES",
+    "SEARCH_TOOL_NAMES",
     "StageDiscipline",
     "VALIDATION_TOOL_NAMES",
     "guard_tools",
