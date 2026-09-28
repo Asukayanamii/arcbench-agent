@@ -21,6 +21,10 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 MY_AGENT = REPO / "my_agent"
 PYTHON = sys.executable
+sys.path.insert(0, str(MY_AGENT))
+
+from arc_main import _rmtree_force  # noqa: E402 - 需要先有上面的 sys.path
+
 VERDICT = re.compile(r"TDD batch [`']([^`']+)[`'] (passed|did not pass)")
 TS = re.compile(r"^\[(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)")
 
@@ -49,8 +53,17 @@ print(f"stop after  : {max_verdicts} TDD verdicts or {max_minutes:.0f} min")
 print(flush=True)
 
 if out_dir.exists():
-    # #12 的修复让 --clean 在 Windows 上也能删只读的 .git 对象了，但这里直接换新目录更干净。
-    shutil.rmtree(out_dir, ignore_errors=True)
+    # 同一个 commit 会复用同一个 out_dir，所以这里必须先删干净。
+    #
+    # ⚠️ 不能用 `shutil.rmtree(..., ignore_errors=True)`：Windows 上 `.git/objects/*`
+    # 带只读属性，默认的 rmtree 删不掉，而 ignore_errors=True 会把失败**吞掉**，
+    # 于是留下一个残缺的 `.git`。下一轮的 `ensure_repo` 只看「.git 存不存在」，
+    # 会跳过 `git init`，之后所有 git 命令**静默落到宿主仓库**（`work/` 在宿主的
+    # .gitignore 里）—— `git add .` 直接抛 "paths are ignored ... work"，
+    # 运行在初始化阶段就死（实测 2026-09-28 第二轮，17 秒）。
+    # 复用 `arc_main._rmtree_force`：它清只读位，而且 `check_clean_survives_readonly_git_objects`
+    # 守着它（#12）。
+    _rmtree_force(out_dir)
 
 env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
 started = time.time()
