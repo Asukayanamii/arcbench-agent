@@ -419,6 +419,73 @@ def check_the_read_cache_records_the_window_the_tool_serves() -> None:
           f"the guard billed {stage_policy.MAX_READ_LIMIT}..500 as if it had been delivered")
 
 
+def check_a_model_call_cannot_hang_forever() -> None:
+    """一次静默挂起的模型调用不能吃掉整轮预算（SCORING_AND_OPTIMIZATION §4.18）。
+
+    实测（`run-logs/2026-09-28-hackathon--github-c847c43-outage`）：14:54:10 报
+    `Connection error` 之后 **46 分钟**日志一个字都没有，最后靠本地看门狗才停下。
+    三层机制都没兜住：`retry.py` 只重试**已经失败**的调用（第 2 次尝试根本没返回）、
+    `stream_chunk_timeout` 只管**分片之间**（响应头都没到它不启动）、SDK 读超时要 600s
+    才第一次失败。
+
+    这条不扫源码，而是**拿一个永不返回的假模型**去撞整段上限：它必须被掀翻，
+    而且要在上限附近回来 —— 否则下一次网络抖动还是会白烧掉半轮。
+    """
+
+    print()
+    print("--- a model call cannot hang forever ---")
+
+    from app import config as app_config  # noqa: PLC0415
+    from app.agent import retry  # noqa: PLC0415
+
+    class _HangingModel:
+        async def ainvoke(self, messages, **kwargs):  # noqa: ANN001, ANN003, ANN201
+            await asyncio.sleep(60)
+            return "never returned"
+
+    class _OkModel:
+        async def ainvoke(self, messages, **kwargs):  # noqa: ANN001, ANN003, ANN201
+            return "fine"
+
+    async def probe() -> tuple[bool, float, str]:
+        saved = retry.LLM_CALL_DEADLINE
+        try:
+            retry.LLM_CALL_DEADLINE = 0.2
+            started = time.perf_counter()
+            try:
+                await retry._ainvoke_with_deadline(_HangingModel(), [])
+            except retry.ModelCallDeadlineExceeded:
+                raised = True
+            else:
+                raised = False
+            elapsed = time.perf_counter() - started
+            retry.LLM_CALL_DEADLINE = 0  # 关掉就该回到"直接调"的老行为
+            unchanged = await retry._ainvoke_with_deadline(_OkModel(), [])
+        finally:
+            retry.LLM_CALL_DEADLINE = saved
+        return raised, elapsed, unchanged
+
+    try:
+        raised, elapsed, unchanged = asyncio.run(asyncio.wait_for(probe(), 20))
+    except asyncio.TimeoutError:
+        raised, elapsed, unchanged = False, float("inf"), "<the probe itself hung>"
+
+    check("a hanging model call is cut off", raised, "the call was allowed to run on")
+    check("it comes back at the deadline, not minutes later",
+          elapsed < 5, f"elapsed={elapsed:.2f}s (deadline was 0.2s)")
+    check("a call without a deadline is unchanged", unchanged == "fine", str(unchanged))
+
+    error = retry.ModelCallDeadlineExceeded("单次模型调用超过 600s 未返回")
+    check("the retry layer treats the deadline as transient",
+          retry.is_retryable(error),
+          "a non-retryable verdict would kill the node instead of retrying it")
+    check("a non-zero default deadline is configured",
+          bool(app_config.LLM_CALL_DEADLINE), f"got {app_config.LLM_CALL_DEADLINE!r}")
+    check("it is longer than the stream-chunk watchdog",
+          (app_config.LLM_CALL_DEADLINE or 0) > (app_config.LLM_STREAM_CHUNK_TIMEOUT or 0),
+          f"deadline={app_config.LLM_CALL_DEADLINE} chunk={app_config.LLM_STREAM_CHUNK_TIMEOUT}")
+
+
 def check_interface_contract_is_not_duplicated() -> None:
     """Ensure normal shared context does not repeat the full interface JSON."""
 
@@ -1724,6 +1791,7 @@ def main() -> int:
     check_repeat_searches_are_served_from_the_cache()
     check_a_failing_validation_does_not_switch_off_the_lookup_cache()
     check_the_read_cache_records_the_window_the_tool_serves()
+    check_a_model_call_cannot_hang_forever()
     check_stage_limits_are_published()
     check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()

@@ -1,0 +1,77 @@
+{
+  "REQ-1-1-1-e2e-register-account": {
+    "test_id": "REQ-1-1-1-e2e-register-account",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-AppRoutes",
+      "REQ-1-1-1-UI-RegisterPage",
+      "REQ-1-1-1-UI-SignInPage",
+      "REQ-1-1-1-UI-SessionProvider",
+      "REQ-1-1-1-API-AuthRoutes",
+      "REQ-1-1-1-API-AuthRouteMount",
+      "REQ-1-1-1-FUNC-AuthService",
+      "REQ-1-1-1-DB-AccountSeed"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/register-account.spec.js",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-integration-register-form": {
+    "test_id": "REQ-1-1-1-integration-register-form",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-UI-RegisterPage",
+      "REQ-1-1-1-UI-SessionProvider",
+      "REQ-1-1-1-UI-SignInPage",
+      "REQ-1-1-1-API-AuthClient"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/auth/RegisterPage.test.tsx",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-integration-register-route": {
+    "test_id": "REQ-1-1-1-integration-register-route",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-API-AuthRoutes",
+      "REQ-1-1-1-API-AuthRouteMount",
+      "REQ-1-1-1-FUNC-AuthService",
+      "REQ-1-1-1-DB-AccountsSchema",
+      "REQ-1-1-1-DB-AccountSeed"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/integration/auth_routes.test.js",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-unit-auth-api-mapping": {
+    "test_id": "REQ-1-1-1-unit-auth-api-mapping",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-API-AuthClient"
+    ],
+    "type": "Unit",
+    "file_path": "frontend/tests/auth/authApi.test.ts",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  },
+  "REQ-1-1-1-unit-auth-service-validation": {
+    "test_id": "REQ-1-1-1-unit-auth-service-validation",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "REQ-1-1-1-FUNC-AuthService",
+      "REQ-1-1-1-DB-AccountsSchema"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/unit/auth_service_validation.test.js",
+    "passed": null,
+    "first_line": "1",
+    "scenario_id": null
+  }
+}

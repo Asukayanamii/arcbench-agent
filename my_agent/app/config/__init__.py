@@ -93,6 +93,19 @@ LLM_STREAM_CHUNK_TIMEOUT: int | None = (
     else _int_or(_RAW_CHUNK_TIMEOUT, 300)
 )
 
+# ---- 单次模型调用的整段上限 ----
+# 上面那个看门狗只管**分片之间**：响应头都没到的时候它不启动，而 SDK 的默认读超时要 600s
+# 才第一次失败 —— 实测一次网络抖动就让整轮卡了 46 分钟，最后靠本地看门狗才停下
+# （run-logs/2026-09-28-hackathon--github-c847c43-outage/README.md §4.18）。
+# 所以给每一次调用一个整段上限：超时算瞬态失败，交给 retry.py 重试。
+# 填 0/off/none 关掉（回到"只靠 SDK 超时"的老行为）。
+_RAW_CALL_DEADLINE = os.getenv("LLM_CALL_DEADLINE", "").strip().lower()
+LLM_CALL_DEADLINE: int | None = (
+    None
+    if _RAW_CALL_DEADLINE in {"0", "off", "none", "disable", "disabled"}
+    else _int_or(_RAW_CALL_DEADLINE, 600)
+)
+
 
 # ---- 上下文自动压缩 ----
 # 窗口这个数只能由配置给：provider 一般不报（DeepSeek 的 /v1/models 只有 id/owned_by），

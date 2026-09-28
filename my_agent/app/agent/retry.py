@@ -23,7 +23,19 @@ import re
 
 from langchain_core.callbacks import BaseCallbackHandler
 
+from app.config import LLM_CALL_DEADLINE
+
 logger = logging.getLogger(__name__)
+
+
+class ModelCallDeadlineExceeded(TimeoutError):
+    """单次模型调用超过 `LLM_CALL_DEADLINE`（默认 600s）还没返回。
+
+    单独一个类型是为了**不靠类名巧合**判它可重试：一次静默挂起（连接连着但不回）
+    既不会触发 `stream_chunk_timeout`（那只管分片之间），也要等 SDK 的 600s 读超时
+    才第一次失败 —— 实测就这样卡了 46 分钟（见 SCORING_AND_OPTIMIZATION.md §4.18）。
+    """
+
 
 MAX_RETRIES = 3
 """最多重试几次（首次调用不算）。Pi 的 `retry.maxRetries` 默认也是 3。"""
@@ -185,6 +197,9 @@ def is_retryable(exc: BaseException) -> bool:
     text = f"{type(exc).__name__}: {exc}"
     if NON_RETRYABLE_PATTERN.search(text):
         return False
+    # 我们自己的整段上限超时：按瞬态处理，显式写出来而不是指望类名里带 "timeout"。
+    if isinstance(exc, ModelCallDeadlineExceeded):
+        return True
     if stream_was_interrupted(exc):
         return True
 
@@ -259,6 +274,22 @@ def _callback_handlers(existing: object) -> list:
     return [existing]
 
 
+async def _ainvoke_with_deadline(model, messages: list, **kwargs):
+    """调一次模型，套上整段上限；`LLM_CALL_DEADLINE` 关掉时就是原来那一次调用。"""
+
+    if not LLM_CALL_DEADLINE or LLM_CALL_DEADLINE <= 0:
+        return await model.ainvoke(messages, **kwargs)
+    try:
+        return await asyncio.wait_for(
+            model.ainvoke(messages, **kwargs), timeout=float(LLM_CALL_DEADLINE)
+        )
+    except asyncio.TimeoutError as exc:
+        # 原错误用 `from` 串上：网关自己的读超时也是 TimeoutError，日志里要能分辨。
+        raise ModelCallDeadlineExceeded(
+            f"单次模型调用超过 {LLM_CALL_DEADLINE}s 未返回（LLM_CALL_DEADLINE）"
+        ) from exc
+
+
 async def ainvoke_with_retry(
     model,
     messages: list,
@@ -276,12 +307,17 @@ async def ainvoke_with_retry(
     覆盖传会丢流式事件（见 `_config_with_spy`）。
 
     被取消（用户点停止）**不重试**，原样抛给上层——那是用户的意思，不是失败。
+
+    **每次调用有整段上限**（`LLM_CALL_DEADLINE`，默认 600s）：超时抛
+    `ModelCallDeadlineExceeded`，按瞬态失败重试。没有它的话，一次"连着但不回"的网络抖动
+    会让这一轮静默卡住——`stream_chunk_timeout` 只管分片之间、SDK 读超时是 600s，
+    实测卡了 46 分钟（见 SCORING_AND_OPTIMIZATION.md §4.18）。
     """
     for attempt in range(1, MAX_RETRIES + 2):
         spy = _TokenSpy()
         try:
-            return await model.ainvoke(
-                messages, config=_config_with_spy(config, spy, tags), **kwargs
+            return await _ainvoke_with_deadline(
+                model, messages, config=_config_with_spy(config, spy, tags), **kwargs
             )
         except asyncio.CancelledError:
             raise
