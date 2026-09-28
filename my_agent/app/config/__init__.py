@@ -106,6 +106,18 @@ LLM_CALL_DEADLINE: int | None = (
     else _int_or(_RAW_CALL_DEADLINE, 600)
 )
 
+# ---- 本轮编译的 token 预算 ----
+# 平台按 token 计量（共享池 initial_budget_cny=500），而被 SIGKILL 的那两次是
+# 210M / 294M token、评测根本没开始 → 0 分。到线就不再接新节点、把当前节点收尾后
+# **正常退出**，让已生成的部分还能被评（见 core/workflow.py 与 §4.20）。
+# 填 0/off/none 关掉（跑到平台自己停为止）。
+_RAW_TOKEN_BUDGET = os.getenv("ARC_TOKEN_BUDGET", "").strip().lower()
+TOKEN_BUDGET: int = (
+    0
+    if _RAW_TOKEN_BUDGET in {"0", "off", "none", "disable", "disabled"}
+    else _int_or(_RAW_TOKEN_BUDGET, 150_000_000)
+)
+
 
 # ---- 上下文自动压缩 ----
 # 窗口这个数只能由配置给：provider 一般不报（DeepSeek 的 /v1/models 只有 id/owned_by），

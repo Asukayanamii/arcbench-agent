@@ -14,7 +14,7 @@ from agents.test_driven_developer import TestDrivenDeveloper
 from agents.test_generator import TestGenerator
 from app_type_handler import create_app_type_handler, normalize_app_type
 from agents.context.pipeline import context_pipeline
-from core import commits, config, files, sessions
+from core import budget, commits, config, files, sessions
 from core.phases import WorkflowPhaseRunner
 from core.service import configure_runtime
 from core.commits import build_commit_message
@@ -446,6 +446,14 @@ class ARCWorkflowManager:
         )
 
         while True:
+            # token 预算软停止：到线就**不再接新节点**，把当前节点收尾、正常走出这个循环，
+            # 让平台还能评已经生成的部分。被 SIGKILL 是 0 分（`passed_count 0`），
+            # 主动收尾至少留下已完成节点的分（SCORING_AND_OPTIMIZATION.md §4.20）。
+            # 用量由 `runners._usage_line` 在每次模型调用结束时记账。
+            if budget.exceeded():
+                await self._log("Compiler", budget.stop_message(), "error")
+                break
+
             task = self._next_runnable_task(queue_state)
             if task is None:
                 break
