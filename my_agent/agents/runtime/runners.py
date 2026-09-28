@@ -436,6 +436,16 @@ async def _log_stream_event(
         return None
 
     if event_name in {"on_chat_model_end", "on_llm_end"}:
+        # 每次模型调用的用量必须落盘 —— 它是解释「为什么一次提交烧 5 亿 token」
+        # 的唯一入口。此前只把 usage 累计给 UI（app/agent/stream.py），ARC 这条路
+        # 连字段都没碰过，于是本地只能靠数模型调用次数估算、平台只给一个总数。
+        #
+        # `cached` 尤其关键：网关每次响应都返回缓存命中数，而它正是
+        # 「平台 143 秒/次 vs 本地 42 秒/次」的钥匙（issue #4 的领域）。
+        # 逐次记录而不是只记总数：总数可以求和，反过来不行。issue #58。
+        usage = _usage_line(data.get("output"))
+        if usage:
+            await _emit_log(log_cb, label, usage, node_id=node_id)
         text = _message_content_text(data.get("output"))
         if text:
             await _emit_log(log_cb, label, f"model-final> {_truncate_text(text, max_chars=2400)}", node_id=node_id)
@@ -667,6 +677,48 @@ def _extract_tool_result_meta(message: Any) -> str:
     if tool_call_id:
         parts.append(f"id={tool_call_id}")
     return " ".join(parts)
+
+
+def _usage_line(message: Any) -> str:
+    """把一次模型调用的用量格式化成一行日志；没有用量信息时返回空串。
+
+    两种字段约定都读：langchain 归一化后的 `input_token_details: {cache_read,
+    cache_creation}`，以及 OpenAI 原生的 `prompt_tokens_details: {cached_tokens}`。
+    只认一种的话，换个 provider 就会静默变成 0 —— 而那会被读成「缓存完全没命中」，
+    是个很贵的误判。
+
+    `cache_hit` 是刻意算出来的：一次提交烧 5 亿 token（issue #57），
+    而命中率是 0 还是 90% 决定完全不同的修法。
+    """
+
+    meta = getattr(message, "usage_metadata", None) or {}
+    if not isinstance(meta, dict) or not meta:
+        return ""
+
+    prompt = int(meta.get("input_tokens") or 0)
+    completion = int(meta.get("output_tokens") or 0)
+
+    details = meta.get("input_token_details")
+    details = details if isinstance(details, dict) else {}
+    cached = details.get("cache_read")
+    created = details.get("cache_creation")
+
+    if cached is None:
+        raw = getattr(message, "response_metadata", None)
+        raw = raw if isinstance(raw, dict) else {}
+        token_usage = raw.get("token_usage")
+        token_usage = token_usage if isinstance(token_usage, dict) else {}
+        prompt_details = token_usage.get("prompt_tokens_details")
+        prompt_details = prompt_details if isinstance(prompt_details, dict) else {}
+        cached = prompt_details.get("cached_tokens")
+
+    cached = int(cached or 0)
+    created = int(created or 0)
+    hit = f"{cached * 100 // prompt}%" if prompt else "-"
+    return (
+        f"model tokens: in={prompt:,} out={completion:,} "
+        f"cached={cached:,} created={created:,} cache_hit={hit}"
+    )
 
 
 def _message_content_text(message: Any) -> str:
