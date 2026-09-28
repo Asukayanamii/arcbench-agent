@@ -7,6 +7,8 @@ import subprocess
 import signal
 import hashlib
 import inspect
+import time
+from pathlib import Path
 
 from typing import Awaitable, Callable
 
@@ -165,6 +167,65 @@ def _missing_runner_message(working_dir: str, binary: str) -> str:
         "interactive prompt instead of failing, which burns the whole test budget on timeouts.\n"
         f"Run `npm install` in that directory (or add the missing dependency), then rerun the tests.\n"
     )
+
+
+def _write_full_test_output(workspace_path: str, test_type: str, text: str) -> str:
+    """把完整的测试输出写到 `.arc/test-output/` 下，返回可读的相对路径。
+
+    为什么要落盘：一次提交烧 5.06 亿 tokens（榜首 872 万，约 58×，issue #57），
+    而测试回执里**整段 STDOUT/STDERR**（含堆栈与分隔线）每次都进上下文 ——
+    每次调用多几千 token × 约 2400 次调用，就是亿级。
+
+    落点选 `.arc/`：issue #36 已把它排除在 grep/find 之外，所以这份完整输出
+    **不会**被检索到、不会反过来变成新的上下文噪音。
+    """
+
+    try:
+        target_dir = Path(workspace_path) / ".arc" / "test-output"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        stamp = time.strftime("%H%M%S")
+        path = target_dir / f"{stamp}-{(test_type or 'batch').lower()}.log"
+        path.write_text(text, encoding="utf-8", errors="replace")
+        return f".arc/test-output/{path.name}"
+    except OSError:
+        return ""
+
+
+# 回执里保留的「信号行」：结论、失败、错误、以及子批次的分隔与退出码。
+# 其余（STDOUT 正文、堆栈、分隔线）都进落盘文件。
+_SIGNAL_PATTERNS = (
+    "Exit Code:",
+    "=== ",
+    "Error:",
+    "FAIL ",
+    "Failed Suites",
+    "Tests  ",
+    "Test Files",
+    "[ARC]",
+)
+
+
+def _compact_test_output(text: str, *, max_signal_lines: int = 40) -> str:
+    """把一段测试输出压成「只留信号」的摘要。
+
+    保留：子批次分隔与各自的 `Exit Code:`（`parse_test_results` 靠它们填 sub_batches）、
+    计数行（`Test Files` / `Tests`）、失败与错误行。
+    丢弃：STDOUT/STDERR 的正文、堆栈、边框。
+
+    `max_signal_lines` 是上限而非目标 —— 正常的失败回执通常只有几行信号。
+    """
+
+    kept: list[str] = []
+    for line in (text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if any(marker in stripped for marker in _SIGNAL_PATTERNS):
+            kept.append(stripped)
+        if len(kept) >= max_signal_lines:
+            kept.append(f"... (more signal lines omitted; see the full output file below)")
+            break
+    return "\n".join(kept)
 
 
 def _default_test_command_timeout() -> float:
@@ -1182,7 +1243,15 @@ class WebAppType(AppTypeHandler):
             body = f"Exit Code: {batch_exit_code}\n\n"
             if load_failure:
                 body += f"[ARC] {load_failure}\n\n"
-            body += sections_text
+            # 只把「信号行」放进回执，完整输出落盘并在下面给路径。
+            # 整段 STDOUT/STDERR（堆栈、边框、分隔线）每次都进上下文，
+            # 乘以约 2400 次调用就是亿级 token（issue #57）。
+            # 压的时候必须留下子批次的 `=== ... ===` 与各自的 `Exit Code:` ——
+            # `parse_test_results` 靠它们填 sub_batches，丢了解析就变了。
+            body += _compact_test_output(sections_text)
+            full_path = _write_full_test_output(self.workspace_path, normalized_type, sections_text)
+            if full_path:
+                body += f"\n\n[ARC] Full test output: {full_path} (read it only if the summary above is not enough)"
             if 124 in exit_codes:
                 body += (
                     "\n\n[ARC] At least one sub-batch did not finish within the command timeout "
