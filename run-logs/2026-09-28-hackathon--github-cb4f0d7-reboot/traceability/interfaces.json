@@ -1,0 +1,192 @@
+{
+  "REQ-1-1-1-API-AuthClient": {
+    "interface_id": "REQ-1-1-1-API-AuthClient",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "API",
+    "content": "{\"interface_id\": \"REQ-1-1-1-API-AuthClient\", \"req_id\": \"REQ-1-1-1\", \"type\": \"API\", \"name\": \"Frontend auth API client\", \"file_path\": \"frontend/src/features/auth/authApi.ts\", \"first_line\": \"3\", \"responsibility\": \"Typed client boundary for the auth endpoints plus the canonical error-code -> field -> message mapping shared by the registration UI.\", \"specification\": \"Uses the shared axios instance from frontend/src/api/index.ts (baseURL '/api') so global request/response interceptors and error handling apply; no page may call axios directly. Exports AuthUser { id, username, email, emailVerified }, RegisterPayload { username, email, password, confirmPassword, agreeToTerms }, RegisterField, RegisterErrorCode, RegisterFieldError { field, code }, RegisterResult { ok, user?, errors }, SignInPayload/SignInResult, SessionResult. Endpoint wrappers: registerAccount(payload) -> POST /api/auth/register returning { ok, user?, errors: RegisterFieldError[] }; signInWithPassword({ identifier, password }) -> POST /api/auth/signin; fetchSession() -> GET /api/auth/session returning { user: AuthUser | null }; signOutSession() -> POST /api/auth/signout. REGISTER_FIELD_MESSAGES supplies the exact user-visible strings ('Username already exists', 'Username format is invalid', 'Email exists'/'Email format is invalid', 'Password requirements are not satisfied', 'Passwords do not match', 'Agree to terms is required') and REGISTER_ERROR_FIELDS maps each code to its owning field so multiple messages can render simultaneously. The register response must never include the password. TODO for TDD: confirm error payload shapes against the implemented route and add the axios interceptor contract if the shared instance still lacks it.\", \"inputs\": [\"RegisterPayload from RegisterPage\", \"credentials/identifier from SignInPage\"], \"outputs\": [\"RegisterResult, SignInResult, SessionResult typed responses\", \"REGISTER_FIELD_MESSAGES / REGISTER_ERROR_FIELDS rendering maps\"], \"callers\": [\"REQ-1-1-1-UI-SessionProvider\", \"REQ-1-1-1-UI-RegisterPage\"], \"callees\": [\"frontend/src/api/index.ts axios instance\", \"REQ-1-1-1-API-AuthRoutes endpoints\"], \"test_focus\": [\"client sends the expected request bodies and paths\", \"error codes map to the exact required field messages and owning fields\"]}",
+    "file_path": "frontend/src/features/auth/authApi.ts",
+    "first_line": "3",
+    "implemented": false,
+    "callers": [
+      "REQ-1-1-1-UI-SessionProvider",
+      "REQ-1-1-1-UI-RegisterPage"
+    ],
+    "callees": [
+      "frontend/src/api/index.ts axios instance",
+      "REQ-1-1-1-API-AuthRoutes endpoints"
+    ]
+  },
+  "REQ-1-1-1-API-AuthRouteMount": {
+    "interface_id": "REQ-1-1-1-API-AuthRouteMount",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "API",
+    "content": "{\"interface_id\": \"REQ-1-1-1-API-AuthRouteMount\", \"req_id\": \"REQ-1-1-1\", \"type\": \"API\", \"name\": \"Auth route + session middleware mounting\", \"file_path\": \"backend/src/app.js\", \"first_line\": \"8\", \"responsibility\": \"Integration point that mounts the auth router before the SPA fallback and installs the session middleware backing /api/auth/session recovery.\", \"specification\": \"backend/src/app.js now requires ./routes/auth_routes and mounts it with app.use('/api/auth', authRoutes) before the static/SPA fallback so API routes are never shadowed by index.html. The session middleware is intentionally not yet installed: TestDrivenDeveloper must add a durable session implementation (cookie-based express-session with a persistent store, or equivalent) via app.use(...) so registration and sign-in state survives reload and GET /api/auth/session returns the current user; the session cookie must be httpOnly and consistent with the sign-out handler. Keep this file to middleware + mounting only; no validation or persistence logic belongs here.\", \"inputs\": [\"incoming HTTP requests under /api/auth\", \"session cookie from the browser\"], \"outputs\": [\"mounted auth router responses\", \"req.session populated for authenticated requests\"], \"callers\": [\"backend/src/index.js (app.listen on port 3411 runtime)\"], \"callees\": [\"REQ-1-1-1-API-AuthRoutes\", \"session store / database session table\"], \"test_focus\": [\"auth endpoints are reachable and not intercepted by the SPA fallback\", \"session cookie round-trip keeps the current user across requests\"]}",
+    "file_path": "backend/src/app.js",
+    "first_line": "8",
+    "implemented": false,
+    "callers": [
+      "backend/src/index.js (app.listen on port 3411 runtime)"
+    ],
+    "callees": [
+      "REQ-1-1-1-API-AuthRoutes",
+      "session store / database session table"
+    ]
+  },
+  "REQ-1-1-1-API-AuthRoutes": {
+    "interface_id": "REQ-1-1-1-API-AuthRoutes",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "API",
+    "content": "{\"interface_id\": \"REQ-1-1-1-API-AuthRoutes\", \"req_id\": \"REQ-1-1-1\", \"type\": \"API\", \"name\": \"Auth routes\", \"file_path\": \"backend/src/routes/auth_routes.js\", \"first_line\": \"1\", \"responsibility\": \"HTTP boundary for registration, sign-in, session recovery, and sign-out, including itemized field-error responses and session establishment.\", \"specification\": \"Express router mounted at /api/auth. POST /register body { username, email, password, confirmPassword, agreeToTerms } -> 201 { ok: true, user: { id, username, email, emailVerified: true }, errors: [] } and establishes the session (registration alone must produce a sign-in-capable account whose email is already verified, with no verification page or token step); 400 { ok: false, user: null, errors: [{ field, code }] } lists every violated rule from one submission so the UI can show username, email, password and terms messages together. Conflict codes: USERNAME_EXISTS -> username, EMAIL_EXISTS -> email (detected in addition to format errors). POST /signin body { identifier, password } where identifier is a username or a registered email -> 200 { ok: true, user } + session, else 401 { ok: false, user: null, message }. GET /session -> 200 { user: AuthUser | null } based on durable session state, used for reload recovery. POST /signout -> 200 { ok: true } and clears session state. Responses must never include password or password_hash. TODO for TDD: replace the placeholder session middleware expectation (req.session installed in backend/src/app.js) with the chosen durable session store, and ensure the JSON error codes stay stable for the frontend maps.\", \"inputs\": [\"JSON request bodies from the frontend auth client\", \"session cookie from the browser\"], \"outputs\": [\"201/400 register responses with aggregated { field, code } errors and never any password data\", \"200/401 sign-in responses, 200 session snapshot, 200 sign-out\"], \"callers\": [\"backend/src/app.js route mounting (REQ-1-1-1-API-AuthRouteMount)\", \"REQ-1-1-1-API-AuthClient\"], \"callees\": [\"REQ-1-1-1-FUNC-AuthService\", \"backend/src/database/db_runtime.js (session/account reads)\"], \"test_focus\": [\"supertest POST /api/auth/register success creates a verified account and returns no password\", \"aggregated 400 errors for username format, email format, password policy, and missing terms in one response\", \"duplicate username yields USERNAME_EXISTS while an unused different email is retained\", \"sign-in with the registered email succeeds and GET /api/auth/session reflects the same user\"]}",
+    "file_path": "backend/src/routes/auth_routes.js",
+    "first_line": "1",
+    "implemented": false,
+    "callers": [
+      "backend/src/app.js route mounting (REQ-1-1-1-API-AuthRouteMount)",
+      "REQ-1-1-1-API-AuthClient"
+    ],
+    "callees": [
+      "REQ-1-1-1-FUNC-AuthService",
+      "backend/src/database/db_runtime.js (session/account reads)"
+    ]
+  },
+  "REQ-1-1-1-DB-AccountSeed": {
+    "interface_id": "REQ-1-1-1-DB-AccountSeed",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "DB",
+    "content": "{\"interface_id\": \"REQ-1-1-1-DB-AccountSeed\", \"req_id\": \"REQ-1-1-1\", \"type\": \"DB\", \"name\": \"Deterministic account seed\", \"file_path\": \"backend/src/database/seed_db.js\", \"first_line\": \"4\", \"responsibility\": \"Creates the pre-existing account required by the GIVEN steps through the normal startup/seed path, idempotently.\", \"specification\": \"seedDatabase() must idempotently seed the pre-existing account from the requirement's GIVEN steps: username 'alice-dev', email 'alice.dev@example.test', password 'Valid-password-123!', email_verified = 1, created in the accounts table with the same scrypt hash format produced by auth_service.hashPassword so sign-in works through the real service path. Use INSERT OR IGNORE (or upsert) keyed on username/email so repeated seeding and repeated application starts are safe and never duplicate or overwrite an existing record. The record is ordinary product state, reachable through POST /api/auth/signin and the UI; it must not be created by frontend constants, a test-only endpoint, or hidden test fixtures. Seed entrypoint must be invoked from the normal application/bootstrap path (backend startup or the documented seed script) so the account exists in the running app after startup/reset. No skeleton was written for this file in DESIGN because the stage write budget was exhausted; TestDrivenDeveloper owns the implementation inside the existing seed_db.js scaffold.\", \"inputs\": [\"seedDatabase() invocation from application startup/bootstrap or the seed script\", \"the seeded account facts declared by the requirement GIVEN steps\"], \"outputs\": [\"one verified alice-dev account row usable for sign-in with Valid-password-123!\"], \"callers\": [\"backend startup/bootstrap path or `node backend/src/database/seed_db.js`\", \"database-using test suites that need the precondition\"], \"callees\": [\"REQ-1-1-1-DB-AccountsSchema\", \"backend/src/services/auth_service.js hashPassword\", \"backend/src/database/db_runtime.js withTransaction\"], \"test_focus\": [\"seeding twice leaves exactly one alice-dev row\", \"sign-in as alice-dev / Valid-password-123! succeeds through the real service and API\", \"the seeded account exists after a normal application start, not only in tests\"]}",
+    "file_path": "backend/src/database/seed_db.js",
+    "first_line": "4",
+    "implemented": false,
+    "callers": [
+      "backend startup/bootstrap path or `node backend/src/database/seed_db.js`",
+      "database-using test suites that need the precondition"
+    ],
+    "callees": [
+      "REQ-1-1-1-DB-AccountsSchema",
+      "backend/src/services/auth_service.js hashPassword",
+      "backend/src/database/db_runtime.js withTransaction"
+    ]
+  },
+  "REQ-1-1-1-DB-AccountsSchema": {
+    "interface_id": "REQ-1-1-1-DB-AccountsSchema",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "DB",
+    "content": "{\"interface_id\": \"REQ-1-1-1-DB-AccountsSchema\", \"req_id\": \"REQ-1-1-1\", \"type\": \"DB\", \"name\": \"accounts table schema\", \"file_path\": \"backend/src/database/init_db.js\", \"first_line\": \"60\", \"responsibility\": \"Idempotent schema creation for the account identity records that registration writes and sign-in reads.\", \"specification\": \"Centralized in initializeDatabase via CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL, email_verified INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now'))). username and email are the account identifiers and carry the uniqueness that prevents duplicate accounts; email_verified defaults to 1 because this product marks a successfully registered email as verified immediately and offers no verification page. Schema evolution stays in this file and is guarded/tolerant per the scaffold guidance; features must not create their own connection or table bootstrap. TODO for TDD: verify initializeDatabase is idempotent across repeated starts and that duplicate INSERT attempts surface as conflicts the service maps to USERNAME_EXISTS / EMAIL_EXISTS.\", \"inputs\": [\"initializeDatabase() called from backend/src/app.js at startup\"], \"outputs\": [\"accounts table available to auth_service through db_runtime helpers\"], \"callers\": [\"REQ-1-1-1-FUNC-AuthService\", \"REQ-1-1-1-DB-AccountSeed\"], \"callees\": [\"backend/src/database/init_db.js runStatement\"], \"test_focus\": [\"repeated initialization does not throw and keeps a single accounts table\", \"UNIQUE constraints on username and email reject duplicates\"]}",
+    "file_path": "backend/src/database/init_db.js",
+    "first_line": "60",
+    "implemented": false,
+    "callers": [
+      "REQ-1-1-1-FUNC-AuthService",
+      "REQ-1-1-1-DB-AccountSeed"
+    ],
+    "callees": [
+      "backend/src/database/init_db.js runStatement"
+    ]
+  },
+  "REQ-1-1-1-FUNC-AuthService": {
+    "interface_id": "REQ-1-1-1-FUNC-AuthService",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "FUNC",
+    "content": "{\"interface_id\": \"REQ-1-1-1-FUNC-AuthService\", \"req_id\": \"REQ-1-1-1\", \"type\": \"FUNC\", \"name\": \"Auth service\", \"file_path\": \"backend/src/services/auth_service.js\", \"first_line\": \"65\", \"responsibility\": \"Validation, conflict detection, account creation with immediate verified-email status, and credential verification for username or email sign-in.\", \"specification\": \"collectFieldErrors(payload) enforces every rule in one pass and returns all violations (never short-circuiting only the first): username must match /^[a-z0-9]+(?:-[a-z0-9]+)*$/ with length 1..39 and no leading/trailing hyphen (USERNAME_INVALID); email is trimmed of leading/trailing whitespace, must be <= 254 chars, contain exactly one '@', and have a dotted non-empty domain with non-empty labels after '@' (EMAIL_INVALID); password must be 12..128 chars with at least one uppercase, one lowercase, one digit, and one non-alphanumeric character and no whitespace (PASSWORD_INVALID); confirmPassword mismatch -> CONFIRM_MISMATCH; agreeToTerms !== true -> TERMS_REQUIRED. registerAccount(payload) adds conflict checks (USERNAME_EXISTS, EMAIL_EXISTS) and, only when no format/terms/mismatch errors remain, inserts the account inside withTransaction with email_verified = 1 and a salted scrypt hash, returning the public { id, username, email, emailVerified: true } shape. authenticate(identifier, password) resolves the account by email first then username, compares scrypt hashes, and returns { ok, user } or { ok: false, message }. No password or hash ever leaves this module. TODO for TDD: verify the aggregated-error contract with supertest, decide whether email conflict is reported alongside username conflict, and keep the scrypt comparison timing-safe.\", \"inputs\": [\"{ username, email, password, confirmPassword, agreeToTerms } from the register route\", \"{ identifier, password } from the sign-in route\"], \"outputs\": [\"{ ok: true, user } or { ok: false, errors: [{ field, code }] } from registerAccount\", \"{ ok, user | message } from authenticate\", \"aggregated collectFieldErrors result for reuse and unit tests\"], \"callers\": [\"REQ-1-1-1-API-AuthRoutes\", \"backend tests and seeds that need a hashed credential\"], \"callees\": [\"backend/src/database/db_runtime.js (run/get/withTransaction)\", \"REQ-1-1-1-DB-AccountsSchema (accounts table)\"], \"test_focus\": [\"each rule boundary (39 vs 40 char username, leading hyphen, 254-char email, missing dot, 11 vs 12 char password, whitespace password, missing special char)\", \"multiple violations returned in one call\", \"created account is sign-in capable and has email_verified true\", \"no account row is created for any rejected submission\"]}",
+    "file_path": "backend/src/services/auth_service.js",
+    "first_line": "65",
+    "implemented": false,
+    "callers": [
+      "REQ-1-1-1-API-AuthRoutes",
+      "backend tests and seeds that need a hashed credential"
+    ],
+    "callees": [
+      "backend/src/database/db_runtime.js (run/get/withTransaction)",
+      "REQ-1-1-1-DB-AccountsSchema (accounts table)"
+    ]
+  },
+  "REQ-1-1-1-UI-AppRoutes": {
+    "interface_id": "REQ-1-1-1-UI-AppRoutes",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-1-UI-AppRoutes\", \"req_id\": \"REQ-1-1-1\", \"type\": \"UI\", \"name\": \"AppRoutes registration\", \"file_path\": \"frontend/src/App.tsx\", \"first_line\": \"4\", \"responsibility\": \"Owns the minimal route wiring and provider mounting that makes the registration/sign-in surfaces reachable in the running app.\", \"specification\": \"frontend/src/App.tsx must wrap the Routes tree in SessionProvider and register the container routes used by this requirement: '/' (home with the 'Sign in' entry), '/signin' (SignInPage, account-access page), '/register' (RegisterPage, opened by the 'Create an account' link), plus the authenticated destination route whose chrome displays the current username from useSession(). Keep this file thin: only provider mounting and Route elements; no form state, validation, or API calls belong here. No skeleton was written for this file in DESIGN because the stage write budget was exhausted; TestDrivenDeveloper owns the edit.\", \"inputs\": [\"React Router location from main.tsx (BrowserRouter)\", \"SessionProvider context\"], \"outputs\": [\"reachable /, /signin, /register, and authenticated destination routes\", \"all routes inside the shared session provider\"], \"callers\": [\"frontend/src/main.tsx\"], \"callees\": [\"REQ-1-1-1-UI-SessionProvider\", \"REQ-1-1-1-UI-SignInPage\", \"REQ-1-1-1-UI-RegisterPage\"], \"test_focus\": [\"GET / serves the SPA and the 'Sign in' entry leads to /signin\", \"/signin 'Create an account' link renders the registration form\", \"direct navigation to /register works under the backend-hosted build on port 3411\"]}",
+    "file_path": "frontend/src/App.tsx",
+    "first_line": "4",
+    "implemented": false,
+    "callers": [
+      "frontend/src/main.tsx"
+    ],
+    "callees": [
+      "REQ-1-1-1-UI-SessionProvider",
+      "REQ-1-1-1-UI-SignInPage",
+      "REQ-1-1-1-UI-RegisterPage"
+    ]
+  },
+  "REQ-1-1-1-UI-RegisterPage": {
+    "interface_id": "REQ-1-1-1-UI-RegisterPage",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-1-UI-RegisterPage\", \"req_id\": \"REQ-1-1-1\", \"type\": \"UI\", \"name\": \"RegisterPage\", \"file_path\": \"frontend/src/pages/RegisterPage.tsx\", \"first_line\": \"28\", \"responsibility\": \"Owns the registration form surface: the labeled fields, the terms checkbox, the Create account submit action, per-field error rendering, and post-success routing to the sign-in page.\", \"specification\": \"Renders the registration page reached from the sign-in page through the unique 'Create an account' link and container route /register. Must expose exactly: one textbox with the accessible label 'Username' (type=text, name=username), one textbox labeled 'Email' (type=text, name=email), one password input labeled 'Password', one password input labeled 'Confirm password', one checkbox labeled 'Agree to the terms' that is initially unchecked, and one enabled button named 'Create account'. Password values must never be echoed into visible text, headings, accessible names, or success output. On submit the component calls session.register({ username, email, password, confirmPassword, agreeToTerms }); when the result is not ok it stays on the page, writes every returned error message beside its owning field (grouped error codes -> messages, multiple errors visible simultaneously, plus a confirm-mismatch message beside 'Confirm password'), and preserves the submitted username and email values. The submit button stays enabled and actionable after a failed submit so all messages remain readable. On ok it navigates to /signin (the sign-in form immediately available) without displaying the password. The rendered field messages must come from the server result, not from a frontend-only constant: 'Username already exists', 'Username format is invalid', 'Email format is invalid', 'Password requirements are not satisfied', 'Agree to terms is required'. TODO for TDD: wire useState values to the inputs, implement handleSubmit, render errors with aria-invalid + a message element per field, and extract the field/error rendering if the file approaches 500 lines.\", \"inputs\": [\"user typing into Username / Email / Password / Confirm password and toggling 'Agree to the terms'\", \"SessionContextValue.register(payload: RegisterPayload) -> RegisterResult\"], \"outputs\": [\"labeled form controls and an enabled 'Create account' button\", \"per-field messages rendered beside Username / Email / Password / Confirm password / Agree to the terms\", \"navigation to /signin on success (no password echo)\"], \"callers\": [\"frontend/src/App.tsx route element for /register\", \"SignInPage 'Create an account' link (frontend/src/pages/SignInPage.tsx)\"], \"callees\": [\"REQ-1-1-1-UI-SessionProvider (useSession)\", \"REQ-1-1-1-API-AuthClient (error code -> message mappings)\"], \"test_focus\": [\"labelled controls exist exactly once each; terms checkbox starts unchecked; button is enabled\", \"invalid submit (username '-bad', email 'not-an-email', password 'short', different confirmation, unchecked terms) shows the username, email, password and terms messages together and preserves the attempted username/email\", \"duplicate username with an unused different email shows 'Username already exists' and retains both attempted values\", \"password text is not rendered as page text after success\", \"successful submit lands on the sign-in page\"]}",
+    "file_path": "frontend/src/pages/RegisterPage.tsx",
+    "first_line": "28",
+    "implemented": false,
+    "callers": [
+      "frontend/src/App.tsx route element for /register",
+      "SignInPage 'Create an account' link (frontend/src/pages/SignInPage.tsx)"
+    ],
+    "callees": [
+      "REQ-1-1-1-UI-SessionProvider (useSession)",
+      "REQ-1-1-1-API-AuthClient (error code -> message mappings)"
+    ]
+  },
+  "REQ-1-1-1-UI-SessionProvider": {
+    "interface_id": "REQ-1-1-1-UI-SessionProvider",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-1-UI-SessionProvider\", \"req_id\": \"REQ-1-1-1\", \"type\": \"UI\", \"name\": \"SessionProvider / useSession\", \"file_path\": \"frontend/src/features/auth/SessionProvider.tsx\", \"first_line\": \"35\", \"responsibility\": \"Single global source of truth for authenticated state: current user, session status, sign-in/sign-out transitions, and reload-time session recovery.\", \"specification\": \"Exposes SessionStatus ('loading' | 'authenticated' | 'anonymous') and SessionContextValue { user, status, register, signIn, signOut, refreshSession } through a React context; useSession() throws outside the provider. On mount it calls refreshSession() -> GET /api/auth/session and sets user/status from the server response, which is how the signed-in username remains visible after a page reload. register(payload) delegates to the register endpoint and must not mark the visitor authenticated unless the server reports success (registration ends on the sign-in page). signIn(identifier, password) updates user + status on success. signOut() clears server session and resets state to anonymous. Every surface (header/workspace current-user display, sign-in, registration) consumes this context instead of holding page-local copies. TODO for TDD: this skeleton is already contract-shaped; TDD verifies the loading state does not flash an authenticated header for anonymous visitors and that the provider is mounted above all routes.\", \"inputs\": [\"RegisterPayload / sign-in credentials from pages\", \"SessionResult from GET /api/auth/session\"], \"outputs\": [\"SessionContextValue consumed by RegisterPage, SignInPage, and the authenticated workspace/header\", \"global unauthenticated -> authenticated transition observable after sign-in or reload\"], \"callers\": [\"frontend/src/App.tsx (provider mounted above Routes)\", \"frontend/src/pages/RegisterPage.tsx\", \"frontend/src/pages/SignInPage.tsx\", \"authenticated destination/header that displays the current username\"], \"callees\": [\"REQ-1-1-1-API-AuthClient (frontend/src/features/auth/authApi.ts)\"], \"test_focus\": [\"context throws outside the provider and returns loading before session resolution\", \"anonymous -> authenticated transition after sign-in\", \"session recovery after remount/reload keeps the username visible\"]}",
+    "file_path": "frontend/src/features/auth/SessionProvider.tsx",
+    "first_line": "35",
+    "implemented": false,
+    "callers": [
+      "frontend/src/App.tsx (provider mounted above Routes)",
+      "frontend/src/pages/RegisterPage.tsx",
+      "frontend/src/pages/SignInPage.tsx",
+      "authenticated destination/header that displays the current username"
+    ],
+    "callees": [
+      "REQ-1-1-1-API-AuthClient (frontend/src/features/auth/authApi.ts)"
+    ]
+  },
+  "REQ-1-1-1-UI-SignInPage": {
+    "interface_id": "REQ-1-1-1-UI-SignInPage",
+    "req_ids": [
+      "REQ-1-1-1"
+    ],
+    "type": "UI",
+    "content": "{\"interface_id\": \"REQ-1-1-1-UI-SignInPage\", \"req_id\": \"REQ-1-1-1\", \"type\": \"UI\", \"name\": \"SignInPage\", \"file_path\": \"frontend/src/pages/SignInPage.tsx\", \"first_line\": \"6\", \"responsibility\": \"Owns the account-access page that hosts the unique 'Create an account' link and submits credentials into the shared session.\", \"specification\": \"Renders the sign-in surface at route /signin with a username-or-email textbox, a password input, a sign-in button, and exactly one link named 'Create an account' pointing to /register. Submit calls session.signIn(identifier, password) from the global session contract; on failure it shows an alert-style message and stays on the page, on success it updates global authenticated state and navigates to the authenticated destination (the workspace) which displays the signed-in username. The sign-in form must accept the email of a just-registered account. TODO for TDD: implement handleSubmit, error message rendering, and the post-success destination; the destination/header current-user display must read from useSession() so it survives reload rather than being page-local state.\", \"inputs\": [\"identifier (username or email) and password typed by the visitor\", \"SessionContextValue.signIn(identifier, password) -> SignInResult\"], \"outputs\": [\"sign-in form controls and the 'Create an account' link to /register\", \"failure message when credentials are rejected\", \"global authenticated state + navigation to the workspace on success\"], \"callers\": [\"frontend/src/App.tsx route element for /signin\", \"RegisterPage redirect target after successful registration (frontend/src/pages/RegisterPage.tsx)\"], \"callees\": [\"REQ-1-1-1-UI-SessionProvider (useSession)\", \"REQ-1-1-1-API-AuthClient (via SessionProvider)\"], \"test_focus\": [\"the 'Create an account' link is present exactly once and opens the registration form\", \"signing in with a freshly registered email succeeds and exposes the authenticated username\", \"failed credentials show a message and keep the form usable\"]}",
+    "file_path": "frontend/src/pages/SignInPage.tsx",
+    "first_line": "6",
+    "implemented": false,
+    "callers": [
+      "frontend/src/App.tsx route element for /signin",
+      "RegisterPage redirect target after successful registration (frontend/src/pages/RegisterPage.tsx)"
+    ],
+    "callees": [
+      "REQ-1-1-1-UI-SessionProvider (useSession)",
+      "REQ-1-1-1-API-AuthClient (via SessionProvider)"
+    ]
+  }
+}
