@@ -1454,6 +1454,69 @@ def check_model_usage_is_logged() -> None:
               "the helper exists but nothing calls it - the data still never lands")
 
 
+def check_test_receipt_is_compacted() -> None:
+    """测试回执只留信号行，完整输出落盘（issue #57）。
+
+    一次提交烧 5.06 亿 tokens（榜首 872 万，约 58×）。测试回执里**整段 STDOUT/STDERR**
+    （堆栈、边框、分隔线）每次都进上下文，乘以约 2400 次调用就是亿级 —— 而模型真正需要的是
+    「哪一层、退几、第一个错误是什么」。
+
+    **本检查最重要的一条不是「变小了」，而是「压完解析结果不能变」**：
+    `parse_test_results` 取第一个 `Exit Code:` 填外层、靠子批次的 `=== ... ===` 与
+    各自的 `Exit Code:` 填 `sub_batches`。压掉这些就等于悄悄改了判定。
+    """
+
+    print()
+    print("--- the test receipt is compacted ---")
+
+    from app_type_handler import web as web_handler  # noqa: PLC0415
+
+    # 仿真实回执：两个子批次，正文很长，信号只有几行。
+    body = "\n".join(f"  padding line {i}" for i in range(400))
+    raw = (
+        "=== Backend Vitest Batch ===\n"
+        "Exit Code: 1\n"
+        "STDOUT:\n" + body + "\n"
+        "STDERR:\n"
+        " FAIL  tests/workbookRename.api.test.js > renames the workbook\n"
+        "Error: expected 2 to be 3\n"
+        "\n=== Frontend Vitest Batch ===\n"
+        "Exit Code: 0\n"
+        "STDOUT:\n" + body + "\n"
+    )
+    compact = web_handler._compact_test_output(raw)
+
+    check("the sub-batch boundaries survive", compact.count("=== ") == 2, compact[:120])
+    check("each sub-batch keeps its exit code", compact.count("Exit Code:") == 2)
+    check("the failure signal survives", "FAIL " in compact and "Error: expected" in compact)
+    check("the padding is dropped", "padding line" not in compact)
+    check("it is dramatically smaller",
+          len(compact) < len(raw) / 10,
+          f"{len(compact)} vs {len(raw)} chars")
+
+    # 判定不能变：把压缩后的正文按 run_test_group 的写法包成信封再解析。
+    envelope = f"Exit Code: 1\n\n{compact}"
+    parsed = test_results.parse_test_results(envelope)
+    raw_parsed = test_results.parse_test_results(f"Exit Code: 1\n\n{raw}")
+    check("the outer exit code is unchanged", parsed["exit_code"] == raw_parsed["exit_code"],
+          f'{parsed["exit_code"]} vs {raw_parsed["exit_code"]}')
+    check("both sub-batches are still found",
+          len(parsed["sub_batches"]) == len(raw_parsed["sub_batches"]) == 2,
+          f'{len(parsed["sub_batches"])} vs {len(raw_parsed["sub_batches"])}')
+    check("the sub-batch exit codes are unchanged",
+          [b["exit_code"] for b in parsed["sub_batches"]]
+          == [b["exit_code"] for b in raw_parsed["sub_batches"]])
+
+    source = (REPO / "app_type_handler" / "web.py").read_text(encoding="utf-8", errors="replace")
+    check("run_test_group actually compacts before returning",
+          "_compact_test_output(sections_text)" in source,
+          "the helper exists but the receipt is still the raw dump")
+    check("the full output is written somewhere the model can ask for",
+          "_write_full_test_output(" in source)
+    check("the full output goes under .arc/ (already excluded from search, issue #36)",
+          '".arc" / "test-output"' in source)
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1478,6 +1541,7 @@ def main() -> int:
     check_suite_load_failure_is_distinguishable()
     check_host_exceptions_are_distinguishable_from_failures()
     check_model_usage_is_logged()
+    check_test_receipt_is_compacted()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()
