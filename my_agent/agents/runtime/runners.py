@@ -10,6 +10,7 @@ from typing import Any, Awaitable, Callable
 from pydantic import BaseModel
 
 from agents.runtime.contracts import AgentRuntimeContext
+from core import budget
 from core.logging import format_json_for_log, log_to_logger
 
 
@@ -715,9 +716,14 @@ def _usage_line(message: Any) -> str:
     cached = int(cached or 0)
     created = int(created or 0)
     hit = f"{cached * 100 // prompt}%" if prompt else "-"
+    # 同一行里顺带记账：token 预算软停止靠它（core/workflow.py 每轮开头检查），
+    # RSS 则让"是不是被内存杀掉"在这份日志里就能看出来（§4.20）。
+    budget.note_tokens(prompt, completion)
+    memory = budget.rss_human()
     return (
         f"model tokens: in={prompt:,} out={completion:,} "
         f"cached={cached:,} created={created:,} cache_hit={hit}"
+        + (f" rss={memory}" if memory else "")
     )
 
 

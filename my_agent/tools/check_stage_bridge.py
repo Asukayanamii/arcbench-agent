@@ -486,6 +486,79 @@ def check_a_model_call_cannot_hang_forever() -> None:
           f"deadline={app_config.LLM_CALL_DEADLINE} chunk={app_config.LLM_STREAM_CHUNK_TIMEOUT}")
 
 
+def check_the_run_stops_itself_before_the_platform_kills_it() -> None:
+    """到 token 预算就**自己收尾**，而不是等平台把进程杀掉（§4.20）。
+
+    平台那两次失败是 `died with <Signals.SIGKILL: 9>`：210M / 294M token、时长差 80 分钟、
+    日志尾部还在正常干活 —— 而且 `passed_count 0 / failed_count 0`，**评测根本没开始**。
+    被杀 = 0 分；自己收尾至少留下已完成节点的分。
+
+    这条验的是"账本 → 判定 → 循环里真的会停"这条链的每一环，以及用量行里带上了 RSS
+    （下一轮平台日志就能看出内存是不是无界增长）。
+    """
+
+    print()
+    print("--- the run stops itself before the platform kills it ---")
+
+    from app import config as app_config  # noqa: PLC0415
+    from core import budget  # noqa: PLC0415
+
+    saved_budget = app_config.TOKEN_BUDGET
+    budget.reset()
+    try:
+        app_config.TOKEN_BUDGET = 100
+        check("a fresh ledger is not over budget", not budget.exceeded())
+        budget.note_tokens(50, 10)
+        check("usage is accumulated", budget.spent_tokens() == 60, f"got {budget.spent_tokens()}")
+        check("still under budget", not budget.exceeded())
+        budget.note_tokens(40, 0)
+        check("the budget trips once the sum passes it", budget.exceeded())
+        check("the stop message says the numbers",
+              "100" in budget.stop_message() and "ARC_TOKEN_BUDGET" in budget.stop_message(),
+              budget.stop_message()[:80])
+    finally:
+        app_config.TOKEN_BUDGET = saved_budget
+        budget.reset()
+
+    # 每次调用的用量行里要带上 RSS —— 否则下一轮还是只能猜"是不是被内存杀掉"。
+    from langchain_core.messages import AIMessage  # noqa: PLC0415
+
+    from agents.runtime import runners  # noqa: PLC0415
+
+    budget.reset()
+    try:
+        app_config.TOKEN_BUDGET = 0  # 关掉，免得影响后面的断言
+        message = AIMessage(
+            content="ok",
+            usage_metadata={"input_tokens": 1_000, "output_tokens": 200, "total_tokens": 1_200},
+        )
+        line = runners._usage_line(message)
+        check("the usage line records the spend for the budget",
+              budget.spent_tokens() == 1_200, f"got {budget.spent_tokens()}")
+        if budget.rss_bytes() is None:
+            print("  SKIP  rss is unavailable on this platform")
+        else:
+            check("the usage line carries the process RSS", " rss=" in line, line)
+
+        check("with the budget off nothing ever trips",
+              not budget.exceeded() and app_config.TOKEN_BUDGET == 0)
+    finally:
+        app_config.TOKEN_BUDGET = saved_budget
+        budget.reset()
+
+    source = (REPO / "core" / "workflow.py").read_text(encoding="utf-8", errors="replace")
+    check("the compile loop consults the budget", "budget.exceeded()" in source)
+    guard = "if budget.exceeded():"
+    take = "task = self._next_runnable_task(queue_state)"
+    if guard in source and take in source:
+        check("...before it picks the next node, so no new work starts",
+              source.index(guard) < source.index(take),
+              "checking after picking a task would start one more node anyway")
+    check("the budget knob is configurable and documented",
+          bool(getattr(app_config, "TOKEN_BUDGET", None)) or app_config.TOKEN_BUDGET == 0,
+          f"got {getattr(app_config, 'TOKEN_BUDGET', None)!r}")
+
+
 def check_interface_contract_is_not_duplicated() -> None:
     """Ensure normal shared context does not repeat the full interface JSON."""
 
@@ -1792,6 +1865,7 @@ def main() -> int:
     check_a_failing_validation_does_not_switch_off_the_lookup_cache()
     check_the_read_cache_records_the_window_the_tool_serves()
     check_a_model_call_cannot_hang_forever()
+    check_the_run_stops_itself_before_the_platform_kills_it()
     check_stage_limits_are_published()
     check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()
