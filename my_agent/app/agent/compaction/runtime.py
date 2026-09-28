@@ -32,6 +32,7 @@ from app.agent.prompts import build_system_prompt
 from app.agent.retry import ainvoke_with_retry
 from app.config import (
     COMPACT_AT,
+    COMPACT_AT_TOKENS,
     COMPACT_ENABLED,
     COMPACT_KEEP_TOKENS,
     LLM_CONTEXT_WINDOW,
@@ -81,7 +82,11 @@ async def compact_once(
     # 不带上就会拿"不含静态上下文的旧视图"比"含它的新视图"，估算偏小。
     workspace = ((config or {}).get("configurable") or {}).get("workspace")
     prompt = build_system_prompt(workspace)
-    trigger = int(LLM_CONTEXT_WINDOW * COMPACT_AT)
+    # 绝对量优先（COMPACT_AT_TOKENS）：它才是「我们的工作集预算」，与用哪个模型无关。
+    # 回退到「窗口 × COMPACT_AT」只在绝对量被显式关掉（0）时发生 —— 那个乘法把两个
+    # 不同性质的数绑在一起，issue #11 把窗口从 64K 调到 1M 时，压缩线被动地从 51K
+    # 抬到 800K，而实测上下文最大只到 53K，于是**压缩从不触发**（issue #58 的日志线）。
+    trigger = COMPACT_AT_TOKENS or int(LLM_CONTEXT_WINDOW * COMPACT_AT)
     before = estimate(messages, state.get("usage_anchor"))
     if not state.get("usage_anchor"):
         # 没有锚点时粗估的是"消息"，而 system 提示词也是要发出去的：不补上它，
