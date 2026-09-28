@@ -1,0 +1,97 @@
+{
+  "REQ-1-1-1__auth-api-boundary__integration": {
+    "test_id": "REQ-1-1-1__auth-api-boundary__integration",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "API-REQ-1-1-1-AUTH-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/features/auth/authApi.test.ts",
+    "passed": false,
+    "first_line": "1: import { beforeEach, describe, expect, it, vi } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1__auth-routes-registration__integration": {
+    "test_id": "REQ-1-1-1__auth-routes-registration__integration",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "API-REQ-1-1-1-AUTH-ROUTES",
+      "FUNC-REQ-1-1-1-AUTH-SERVICE",
+      "DB-REQ-1-1-1-SEED-ACCOUNT"
+    ],
+    "type": "Integration",
+    "file_path": "backend/tests/routes/authRoutes.test.js",
+    "passed": false,
+    "first_line": "1: import { afterAll, beforeAll, describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1__auth-service-registration-session__unit": {
+    "test_id": "REQ-1-1-1__auth-service-registration-session__unit",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "FUNC-REQ-1-1-1-AUTH-SERVICE",
+      "DB-REQ-1-1-1-ACCOUNTS-SCHEMA",
+      "DB-REQ-1-1-1-SEED-ACCOUNT"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/services/authService.test.js",
+    "passed": true,
+    "first_line": "1: import { afterAll, beforeAll, describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1__auth-validation-rules__unit": {
+    "test_id": "REQ-1-1-1__auth-validation-rules__unit",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "FUNC-REQ-1-1-1-AUTH-VALIDATION"
+    ],
+    "type": "Unit",
+    "file_path": "backend/tests/services/authValidation.test.js",
+    "passed": true,
+    "first_line": "1: import { describe, expect, it } from 'vitest';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1__global-session-restore__integration": {
+    "test_id": "REQ-1-1-1__global-session-restore__integration",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "UI-REQ-1-1-1-SESSION-CONTEXT",
+      "API-REQ-1-1-1-AUTH-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/features/auth/AuthSessionContext.test.tsx",
+    "passed": false,
+    "first_line": "1: import { render, screen, waitFor } from '@testing-library/react';",
+    "scenario_id": null
+  },
+  "REQ-1-1-1__register-account-scenarios__e2e": {
+    "test_id": "REQ-1-1-1__register-account-scenarios__e2e",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "UI-REQ-1-1-1-REGISTER-PAGE",
+      "UI-REQ-1-1-1-SIGN-IN-PAGE",
+      "UI-REQ-1-1-1-SESSION-CONTEXT",
+      "API-REQ-1-1-1-AUTH-ROUTES",
+      "DB-REQ-1-1-1-SEED-ACCOUNT"
+    ],
+    "type": "E2E",
+    "file_path": "backend/test-e2e/req-1-1-1-register-account.spec.js",
+    "passed": true,
+    "first_line": "1: const { test, expect } = require('@playwright/test');",
+    "scenario_id": null
+  },
+  "REQ-1-1-1__register-page-form__integration": {
+    "test_id": "REQ-1-1-1__register-page-form__integration",
+    "req_id": "REQ-1-1-1",
+    "interface_ids": [
+      "UI-REQ-1-1-1-REGISTER-PAGE",
+      "UI-REQ-1-1-1-SESSION-CONTEXT",
+      "API-REQ-1-1-1-AUTH-CLIENT"
+    ],
+    "type": "Integration",
+    "file_path": "frontend/tests/pages/RegisterPage.test.tsx",
+    "passed": false,
+    "first_line": "1: import { render, screen, waitFor } from '@testing-library/react';",
+    "scenario_id": null
+  }
+}

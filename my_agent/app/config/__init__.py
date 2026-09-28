@@ -115,6 +115,25 @@ COMPACT_ENABLED = os.getenv("COMPACT_ENABLED", "1").strip() != "0"
 # （为省 token，偏早），0.8 是折中。
 COMPACT_AT = _ratio_or(os.getenv("COMPACT_AT", "").strip(), 0.8)
 
+# 压缩触发的**绝对** token 数。设了它就以它为准，`LLM_CONTEXT_WINDOW × COMPACT_AT` 不再参与。
+#
+# 为什么要解耦：触发点 = 窗口 × COMPACT_AT，而窗口在 issue #11 里从 64K 调到了 1M ——
+# 于是压缩线被动地从 51K 抬到 **800K**，而实测上下文最大只到 53K（issue #58 的日志线），
+# **压缩实际上从不触发**，历史一路涨到会话结束。一次提交因此烧 5.06 亿 tokens
+# （榜首 872 万，约 58×），最后被 SIGKILL。
+#
+# 这两个数管的是不同的东西：
+#   * 模型窗口 = **物理上限**，超了 provider 报错
+#   * 这条线   = **我们的工作集预算**，与用哪个模型无关
+# 绑在一起的话，换个模型就会连带改掉压缩行为。
+#
+# 默认 60000：实测会话从约 21K 起步、每次调用涨 1-3K，60K 意味着长会话大约压一次；
+# 而 `COMPACT_KEEP_TOKENS`(20000) 保证最近 20K 原文不动，所以正在改的那部分不会被摘掉。
+COMPACT_AT_TOKENS = _int_or(os.getenv("COMPACT_AT_TOKENS", "").strip(), 60_000)
+COMPACT_TRIGGER_SOURCE = (
+    "环境变量 COMPACT_AT_TOKENS" if os.getenv("COMPACT_AT_TOKENS", "").strip() else "默认值（绝对量 60000）"
+)
+
 # 保留的最近原文预算（Pi 的默认值），其余中段摘要掉。
 COMPACT_KEEP_TOKENS = _int_or(os.getenv("COMPACT_KEEP_TOKENS", "").strip(), 20_000)
 

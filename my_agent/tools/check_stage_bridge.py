@@ -1517,6 +1517,45 @@ def check_test_receipt_is_compacted() -> None:
           '".arc" / "test-output"' in source)
 
 
+def check_compaction_trigger_is_not_tied_to_the_window() -> None:
+    """压缩触发点必须是**绝对量**，不能跟着模型窗口变（issue #61）。
+
+    触发点原先是 `LLM_CONTEXT_WINDOW * COMPACT_AT`。issue #11 把窗口从 64K 调到 1M
+    「防止过早压缩」—— 于是压缩线被动地从 **51K 抬到 800K** ✗。而 issue #58 的日志线
+    实测上下文最大只到 **53K**，也就是说**压缩从不触发**，历史一路涨到会话结束，
+    一次提交烧 5.06 亿 tokens（榜首 872 万，约 58×），最后被 SIGKILL。
+
+    这里检查两件事：
+    1. 绝对量存在，且**远低于**窗口 —— 否则它等于没设
+    2. 源码里触发点**优先用绝对量**，不再以「窗口 × 比例」为主
+    """
+
+    print()
+    print("--- the compaction trigger is not tied to the window ---")
+
+    from app import config  # noqa: PLC0415
+
+    trigger = int(getattr(config, "COMPACT_AT_TOKENS", 0) or 0)
+    window = int(getattr(config, "LLM_CONTEXT_WINDOW", 0) or 0)
+    keep = int(getattr(config, "COMPACT_KEEP_TOKENS", 0) or 0)
+
+    check("an absolute trigger exists", trigger > 0, f"got {trigger}")
+    check("it is far below the model window",
+          window > 0 and trigger < window / 5,
+          f"trigger={trigger:,} window={window:,} - a trigger near the window never fires")
+    check("it leaves room above the kept tail",
+          trigger > keep * 2,
+          f"trigger={trigger:,} keep={keep:,} - compacting would immediately re-trigger")
+
+    runtime = (REPO / "app" / "agent" / "compaction" / "runtime.py").read_text(encoding="utf-8", errors="replace")
+    check("the trigger prefers the absolute value",
+          "COMPACT_AT_TOKENS or int(LLM_CONTEXT_WINDOW * COMPACT_AT)" in runtime,
+          "the window product is back in charge - #11's mistake")
+    check("the window product survives only as a fallback",
+          runtime.count("LLM_CONTEXT_WINDOW * COMPACT_AT") == 1,
+          "more than one place still scales the trigger by the window")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1542,6 +1581,7 @@ def main() -> int:
     check_host_exceptions_are_distinguishable_from_failures()
     check_model_usage_is_logged()
     check_test_receipt_is_compacted()
+    check_compaction_trigger_is_not_tied_to_the_window()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()
