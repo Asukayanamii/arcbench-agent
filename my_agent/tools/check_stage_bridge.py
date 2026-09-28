@@ -1397,6 +1397,63 @@ def check_host_exceptions_are_distinguishable_from_failures() -> None:
               "_agent_call_failed" in runners)
 
 
+def check_model_usage_is_logged() -> None:
+    """每次模型调用的用量与**缓存命中**必须能落盘（issue #58）。
+
+    一次提交烧 5.06 亿 tokens（榜首 872 万，约 58×，#57），最后被 SIGKILL。
+    而在此之前，ARC 这条路（`runners._log_stream_event`）**连 usage 字段都没碰过** ——
+    本地只能靠数模型调用次数估算，平台只给一个总数，看不到花在哪一步。
+
+    `cached` 是这条里最贵的字段：它决定「命中率 0% 还是 90%」，
+    而这两种情况的修法完全相反。所以两种 provider 的字段约定都要认 ——
+    只认一种的话，换个网关就会静默变成 0。
+    """
+
+    print()
+    print("--- model usage is logged ---")
+
+    from langchain_core.messages import AIMessage  # noqa: PLC0415
+
+    from agents.runtime import runners  # noqa: PLC0415
+
+    langchain_style = AIMessage(
+        content="ok",
+        usage_metadata={
+            "input_tokens": 85_231,
+            "output_tokens": 412,
+            "total_tokens": 85_643,
+            "input_token_details": {"cache_read": 78_900, "cache_creation": 0},
+        },
+    )
+    line = runners._usage_line(langchain_style)
+    check("a langchain-shaped usage_metadata is read", bool(line), "got empty string")
+    check("input / output are reported", "in=85,231" in line and "out=412" in line, line[:120])
+    check("cache_read is reported", "cached=78,900" in line, line[:120])
+    check("a hit ratio is computed", "cache_hit=92%" in line, line[:120])
+
+    openai_style = AIMessage(
+        content="ok",
+        usage_metadata={"input_tokens": 10_000, "output_tokens": 100, "total_tokens": 10_100},
+        response_metadata={"token_usage": {"prompt_tokens_details": {"cached_tokens": 0}}},
+    )
+    openai_line = runners._usage_line(openai_style)
+    check("the OpenAI-shaped fallback is read too",
+          "cached=0" in openai_line and "cache_hit=0%" in openai_line,
+          openai_line[:120])
+
+    check("a message without usage yields nothing (no fake zeros)",
+          runners._usage_line(AIMessage(content="ok")) == "")
+
+    source = (REPO / "agents" / "runtime" / "runners.py").read_text(encoding="utf-8", errors="replace")
+    marker = 'if event_name in {"on_chat_model_end", "on_llm_end"}:'
+    check("the stream event handler exists", marker in source)
+    if marker in source:
+        branch = source[source.index(marker) : source.index(marker) + 900]
+        check("it actually logs the usage line",
+              "_usage_line(" in branch,
+              "the helper exists but nothing calls it - the data still never lands")
+
+
 def main() -> int:
     check_skill_roots()
     check_pagination()
@@ -1420,6 +1477,7 @@ def main() -> int:
     check_an_unattempted_layer_is_retried()
     check_suite_load_failure_is_distinguishable()
     check_host_exceptions_are_distinguishable_from_failures()
+    check_model_usage_is_logged()
     check_extra_tools_are_published_and_wired()
     check_subagent_read_only_boundary()
     check_todo_and_command_behaviour()
