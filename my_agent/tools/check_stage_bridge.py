@@ -481,6 +481,12 @@ def check_a_model_call_cannot_hang_forever() -> None:
           "a non-retryable verdict would kill the node instead of retrying it")
     check("a non-zero default deadline is configured",
           bool(app_config.LLM_CALL_DEADLINE), f"got {app_config.LLM_CALL_DEADLINE!r}")
+    # 平台实测单次最长 143–146s。这条限制是我们自己加的，**不能把"只是慢"的调用截断**
+    # （砍掉本来能跑完的活最不划算），所以要么留足余量、要么明确关掉。
+    deadline = app_config.LLM_CALL_DEADLINE or 0
+    check("the deadline is either off or has real margin over the slowest observed call",
+          deadline == 0 or deadline >= 1500,
+          f"deadline={deadline}s vs observed max 146s - too tight, it would cut slow-but-fine calls")
     check("it is longer than the stream-chunk watchdog",
           (app_config.LLM_CALL_DEADLINE or 0) > (app_config.LLM_STREAM_CHUNK_TIMEOUT or 0),
           f"deadline={app_config.LLM_CALL_DEADLINE} chunk={app_config.LLM_STREAM_CHUNK_TIMEOUT}")
@@ -554,9 +560,10 @@ def check_the_run_stops_itself_before_the_platform_kills_it() -> None:
         check("...before it picks the next node, so no new work starts",
               source.index(guard) < source.index(take),
               "checking after picking a task would start one more node anyway")
-    check("the budget knob is configurable and documented",
-          bool(getattr(app_config, "TOKEN_BUDGET", None)) or app_config.TOKEN_BUDGET == 0,
-          f"got {getattr(app_config, 'TOKEN_BUDGET', None)!r}")
+    check("the budget is OFF by default (the platform cap is not documented)",
+          app_config.TOKEN_BUDGET == 0,
+          f"got {app_config.TOKEN_BUDGET!r} - tasks are many and the cap is unknown, "
+          "so the default lets the run finish; set ARC_TOKEN_BUDGET to arm it")
 
 
 def check_interface_contract_is_not_duplicated() -> None:

@@ -97,25 +97,31 @@ LLM_STREAM_CHUNK_TIMEOUT: int | None = (
 # 上面那个看门狗只管**分片之间**：响应头都没到的时候它不启动，而 SDK 的默认读超时要 600s
 # 才第一次失败 —— 实测一次网络抖动就让整轮卡了 46 分钟，最后靠本地看门狗才停下
 # （run-logs/2026-09-28-hackathon--github-c847c43-outage/README.md §4.18）。
-# 所以给每一次调用一个整段上限：超时算瞬态失败，交给 retry.py 重试。
-# 填 0/off/none 关掉（回到"只靠 SDK 超时"的老行为）。
+#
+# 值取 1800s：平台实测单次最长 143–146s（文档 §3），**12× 余量** —— 只有真挂起才会触发，
+# 不会把"只是慢"的调用截断（那条限制是我们自己加的，砍掉本来能跑完的活最不划算）。
+# 想彻底关掉：`LLM_CALL_DEADLINE=0`。
 _RAW_CALL_DEADLINE = os.getenv("LLM_CALL_DEADLINE", "").strip().lower()
 LLM_CALL_DEADLINE: int | None = (
     None
     if _RAW_CALL_DEADLINE in {"0", "off", "none", "disable", "disabled"}
-    else _int_or(_RAW_CALL_DEADLINE, 600)
+    else _int_or(_RAW_CALL_DEADLINE, 1800)
 )
 
-# ---- 本轮编译的 token 预算 ----
-# 平台按 token 计量（共享池 initial_budget_cny=500），而被 SIGKILL 的那两次是
-# 210M / 294M token、评测根本没开始 → 0 分。到线就不再接新节点、把当前节点收尾后
-# **正常退出**，让已生成的部分还能被评（见 core/workflow.py 与 §4.20）。
-# 填 0/off/none 关掉（跑到平台自己停为止）。
+# ---- 本轮编译的 token 预算（默认关闭）----
+# 机制在 `core/budget.py` + `core/workflow.py`：到线就不再接新节点、当前节点收尾后**正常退出**，
+# 让已生成的部分还能被评（被 SIGKILL 是 0 分）。
+#
+# **默认 0 = 不限制**，理由：任务量大（65 个节点），而平台侧的 token 上限**没有文档化**
+# （赛事 FAQ 只说"Token 配额对所有队一视同仁"，没给数值；平台唯一显式资源是共享 ￥500 池）。
+# 我们已知的两次被杀是 210M / 294M token，但那是"被杀的用量"、不等于"上限"。
+# 所以先让它跑满，用每次调用的用量行（`in=`/`cached=`/`rss=`）把真实曲线量出来，
+# 再把线设在实测值下面。要现在就防一手：`ARC_TOKEN_BUDGET=250000000`。
 _RAW_TOKEN_BUDGET = os.getenv("ARC_TOKEN_BUDGET", "").strip().lower()
 TOKEN_BUDGET: int = (
     0
-    if _RAW_TOKEN_BUDGET in {"0", "off", "none", "disable", "disabled"}
-    else _int_or(_RAW_TOKEN_BUDGET, 150_000_000)
+    if _RAW_TOKEN_BUDGET in {"", "0", "off", "none", "disable", "disabled"}
+    else _int_or(_RAW_TOKEN_BUDGET, 0)
 )
 
 
