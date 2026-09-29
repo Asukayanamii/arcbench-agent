@@ -1,0 +1,50 @@
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  *
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  * The adjusters are pure string transforms over the stored formula text; they
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  * only touch formulas (values starting with '=') and leave ordinary values
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  * untouched, so a row operation can rewrite a moved cell's value in place.
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  */
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] 
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] const CELL_REFERENCE = /([A-Z]{1,2})([1-9][0-9]*)/g;
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] 
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] function isFormula(value) {
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   return typeof value === 'string' && value.startsWith('=');
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] }
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] 
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] /**
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  * Shift every row reference >= insertAt down by one (the blank row inserted
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  * above pushes the referenced rows down together with the data).
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  */
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] function adjustFormulaForInsert(formula, insertAt) {
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   if (!isFormula(formula)) return formula;
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   return formula.replace(CELL_REFERENCE, (match, column, rowText) => {
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]     const row = Number(rowText);
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]     return row >= insertAt ? `${column}${row + 1}` : match;
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   });
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] }
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] 
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] /**
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  * Adjust references around a deleted row: references to the deleted row
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  * become the explicit error #REF!, references beyond it shift up by one.
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]  */
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] function adjustFormulaForDelete(formula, deletedRow) {
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   if (!isFormula(formula)) return formula;
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   return formula.replace(CELL_REFERENCE, (match, column, rowText) => {
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]     const row = Number(rowText);
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]     if (row === deletedRow) return '#REF!';
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]     if (row > deletedRow) return `${column}${row - 1}`;
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]     return match;
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   });
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] }
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] 
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] const COLUMN_BASE = 26;
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] 
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] /** Convert a spreadsheet column label (A..ZZ) to its 1-based number. */
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] function columnToNumber(label) {
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   let value = 0;
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]   for (const char of label.toUpperCase()) {
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1]     va
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] ...[truncated]
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] tool-result> read_file result="content='backend/src/database/seed_db.js（共 63 行，显示 1-63）\\\
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] ...[truncated]
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] tool-result> read_file result="content=\\"backend/src/services/formulaRefs.js（共 116 行，显示 1-100）\\\
+[2026-09-29 13:13:47] [generation-agent.stdout] [2026-09-29T13:13:47.740+00:00] [InterfaceDesigner][REQ-3-1-1] ...[truncated]

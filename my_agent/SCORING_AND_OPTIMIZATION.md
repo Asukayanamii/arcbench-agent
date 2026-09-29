@@ -408,6 +408,10 @@ backend/src/database/init_db.js
 - [x] 压缩摘要改成独立用户消息（压缩不再打塌前缀缓存，见 §4.15）
 - [x] 检索类工具接入查询缓存（`ls` / `glob` / `grep`），并把两个缓存与"失败即整阶段解锁"解耦
       —— **实测收益≈0**，而且顺手更正了 issue #63 的计数（那是日志行数，见 §4.17）
+- [x] 墙钟软停止（`ARC_RUN_DEADLINE_SECONDS`，默认 23h；到线自己收尾并**退出 0**）
+      —— 平台 24h 软时限与非零退出不评测都是实测的，见 §4.22
+- [x] 中段 < 512 tokens 不再调摘要器（`MIN_MIDDLE_TOKENS`），并修好
+      `_test_compaction_prefix.py` 自 #62 起的静默空转（绝对触发点默认 60000，它只设了窗口×比例）
 
 **第二批（需要验证再上）**
 - [ ] 预读接口契约里点名的文件，减少工具往返
@@ -591,11 +595,20 @@ tokens 是其可见上限，todo 的拉取式清单不会改变 system 前缀。
    要现在就防一手：`ARC_TOKEN_BUDGET=250000000`。
    行为检查：`check_the_run_stops_itself_before_the_platform_kills_it`
    （账本/判定/循环顺序都验；断言默认是关的）。
+   **⚠️ 2026-09-29：token 预算挡不住"时间用光"** —— 平台在 86,401s 处直接杀（§4.22），
+   所以又加了第 4 条；两条线互相独立。
 3. **每次调用的用量行里带上 RSS（✅ 已做）**：`model tokens: … rss=1.23GB`。
    那两次 SIGKILL 的日志尾部都是正常干活、没有异常，时长还差 80 分钟 ——
    最像被按内存杀掉；带上 RSS 之后，下一轮平台日志能直接看出内存曲线是平的还是无界增长。
    顺带记下：Windows 上 `GetProcessMemoryInfo` 必须显式声明签名，否则伪句柄 (-1) 被当成
    无效句柄、调用静默失败（实测踩到，已修）。
+   （2026-09-29 已量到：**有界、锯齿**，github 峰值 1.31GB / sheet 788MB，见 §4.22。）
+4. **墙钟软停止（✅ 已做，默认 23h）**：`ARC_RUN_DEADLINE_SECONDS`（默认 `82,800`=23h）。
+   平台实测 **86,401s** 给 `SoftTimeLimitExceeded()`（celery soft time limit）；被杀 =
+   评测不开始 = 0 分。到线就：不再接新节点 + **把在跑的任务也停**（节点实测最长 7.6h，
+   "等它做完"赶不上墙）+ **退出 0**（非零退出平台同样不评测 —— `run_tests: Not reached`，
+   run `7d895aac11f4` 的 35.5M token 就是这么白跑的）。取证与数字见 §4.22。
+   行为检查：`check_the_run_finishes_before_the_platform_time_limit`。
 
 ### 4.21 平台侧到底有没有"强制截停"？查证结果（2026-09-28）
 
@@ -627,9 +640,83 @@ tokens 是其可见上限，todo 的拉取式清单不会改变 system 前缀。
 → 最像**被按内存杀掉（OOM）**：那两次跑的版本还没有 #61 的压缩触发点，单次调用上下文会涨到
 1M 窗口，而 TestGenerator 又在写大文件。**待验证**：下一轮日志里的 `rss=` 曲线（§4.20 第 3 条）。
 
+**2026-09-29 更新（24h 那轮的取证）**：上面「没有强制截停」的结论**被实测推翻**：
+2026-09-28 13:21:52 起跑的两题在 **86,401s**（恰好 24h）同时被杀，`failure_reason =
+SoftTimeLimitExceeded()` —— 平台有 celery 的 soft time limit。24h 那轮的 `rss=` 曲线
+**有界、锯齿**（github 102MB → 峰值 1.31GB → 收尾 ~510MB；sheet 788MB）→ **不是内存死的**；
+但"9h/7.7h 那两次是 OOM"至今**没有直接证据**（那两轮没有 rss 数据）。另一个独立实测：
+**非零退出 = 平台不评测**（`start_agent: failed` → `run_tests: Not reached`），
+所以"主动收尾"必须**退出 0**。全部细节见 §4.22 与 `run-logs/2026-09-28-hackathon-softlimit-24h/`。
+
 预算换算（给上面两条定阈值）：E = 0.4 × N × p ÷ 100；综合榜 N=200，p=50% → **E = ¥40**。
 按混合均价 ¥0.217/M 算，**¥40 ≈ 1.84 亿 token（两题合计）** —— 先进奖励区（≤1.84 亿），
 再谈更低。上次是 5.06 亿 / ¥109.65，而且被杀了。
+
+### 4.22 平台的 24h 软时限是**实测**的；非零退出等于不评测（✅ 已修：`ARC_RUN_DEADLINE_SECONDS`）
+
+**取证**（归档 `run-logs/2026-09-28-hackathon-softlimit-24h/`；脚本 `work/arc_tail.py` +
+`work/analyze_24h.py`，走 API 只留相关切片，日志本体 36MB / 38MB）：
+
+| run | 任务 | 起止（UTC） | 时长 | 输入 tokens | 花费 | 结局 |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| `343cf77b3bfc` | hackathon--github | 09-28 13:21:52 → 09-29 13:21:53 | **86,401s** | 219.2M | ¥124.18 | `SoftTimeLimitExceeded()` |
+| `702881a10479` | hackathon--sheet | 同上（两题并行） | **86,401s** | 262.1M | ¥120.31 | `SoftTimeLimitExceeded()` |
+
+- 两题都是 `passed_count 0 / failed_count 0`、`steps.run_tests = Evaluation pending`
+  → **评测没开始**，第 3 次 0 分。两题合计烧掉 **¥244.49**，池子只剩 **￥119.24**
+  （页面 MY REMAINING BUDGET 实测；E(p=50%) 才 ¥40）
+- **用的是哪个包**：日志里有 `rss=` 用量行（≥ #67），且报错原话是
+  「单次模型调用超过 **1800s** 未返回（LLM_CALL_DEADLINE）」—— 1800 是 #68 才改的默认值
+  （#66 是 600s）→ 包就是**当时的 dev tip**（`018df66`），不是旧包
+- `Token budget reached` **0 次** ✓（预算默认关，符合预期）
+
+**rss 曲线：有界、锯齿**（不是无界增长）：github 102MB → 峰值 **1.31GB**（09-29 07–08 点）
+→ 收尾 ~510MB；sheet 102MB → 788MB → 348MB。**24h 这轮不是内存死的**。
+
+**为什么 24 小时没跑完**：
+
+| | github | sheet |
+| --- | ---: | ---: |
+| 模型调用 | 3,435 | 3,754 |
+| 判定过的节点（test-passed / 总数） | 12 / 65 | 18 / 42 |
+| >2 分钟的停顿 | 110 次 / 合计 **9.5h** | 119 次 / 合计 **8.0h** |
+| 最长停顿 | 74.5 / 69.7 分钟 | 51.1 分钟 |
+| 单个节点最长耗时 | **7.6h**（REQ-2-2-2） | >9h（REQ-2，未跑完） |
+
+停顿的三个来源（归档里的 `*-stderr.log` 逐条可查）：
+
+1. **流中断 → 整段 agent 调用回退重跑**：`Unterminated string`（流式 JSON 被截断）→
+   `agent stream failed; falling back to ainvoke`（github 4 次）→ 回退那次又静默跑几十分钟
+   （74.5 分钟那个坑就是这个形状：12:05:40 后没有一次调用落地，13:19:25 才吐出整批工具结果）
+2. **单次调用 1800s 上限真的触发**：github 2 次（15:55:43、17:35:34，后者伴随
+   `langchain_openai.stream_chunk_timeout fired`）
+3. **压缩空转**：`摘要没带来净收益，不写入`（中段 78–2128 tokens，摘要块反而更大）
+   在同一 thread 上 08:48–09:57 反复 10+ 次，每次都是一次完整摘要调用
+
+按 12 节点 / 24h 外推：github 65 节点要 **~130 小时**、sheet 42 节点要 ~56 小时 ——
+**"跑满 24h"在当前架构下就是必死**。墙既然实测了，装不装得下就由"每个节点多少往返"决定；
+下一步该打的是停顿来源 1 与节点耗时，而不是继续抠 token。
+
+**新增机制：墙钟软停止（默认 23h）**
+
+- `ARC_RUN_DEADLINE_SECONDS`（默认 `82,800`=23h，`0/off/none` 关掉；留 1h 给进程收尾与平台评测）
+- 到线：不再接新节点 + **在跑的任务一起停**（`asyncio.wait_for(self._run_task(task), 剩余秒数)`），
+  然后正常走出编译循环
+- **退出码必须是 0**：这条是独立实测出来的 —— run `7d895aac11f4`（35.5M token、2.3h）
+  **非零退出**时平台 `start_agent: failed`、`run_tests: pending - Not reached` → 不评测 = 0 分。
+  所以软停止会带 `soft_stop` 标记，CLI 看到它就退出 0 并跳过 failure report，平台才会评测
+  已经生成的部分（§4.21 的 token 预算软停止走的也是这条路，同样受益）
+- 行为检查：`check_the_run_finishes_before_the_platform_time_limit`
+  （旧代码上红：`core/budget.py` 没有墙钟；也验"非零退出"那条语义）
+- 端到端冒烟：`ARC_RUN_DEADLINE_SECONDS=150` 本地跑一轮 → 日志出现
+  `Run deadline reached while a task was still running …`、进程**退出 0**、不写 failure report
+  （`run-logs/2026-09-29-hackathon--github-018df66/`）
+
+**顺带修的小钱：中段太小的压缩不再调摘要器**（`MIN_MIDDLE_TOKENS = 512`）。
+上面第 3 类停顿每次白花一个摘要调用；中段 <512 tokens 时摘要块（光分隔标记就几十 token）
+不可能更短。行为检查 `check_a_tiny_middle_is_not_summarised`（小中段 0 次调用、真中段照常压）。
+同一处还发现 `_test_compaction_prefix.py` 自 #62 起**静默空转**（绝对触发点默认 60000，
+而它只设了"窗口 × 比例"，整段会话到不了线 → 压缩永不发生、四个断言全红），已修。
 
 **每次改完**
 - [ ] `python tools/check_stage_bridge.py`（守住技能根与分页语义）

@@ -382,7 +382,8 @@ async def cmd_compile(args: argparse.Namespace) -> int:
         stop_cli_spinner()
     
     elapsed = time.time() - start_time
-    if not result.get("ok"):
+    soft_stop = str(result.get("soft_stop") or "")
+    if not result.get("ok") and not soft_stop:
         report_paths = write_failure_report(
             output_dir=config.output_dir,
             requirement_path=config.requirement_path,
@@ -391,6 +392,13 @@ async def cmd_compile(args: argparse.Namespace) -> int:
         )
         result["failure_report_paths"] = report_paths
     print_compilation_summary(result, config.output_dir, elapsed)
+    if soft_stop:
+        # 主动收尾（token 预算 / 墙钟）要**当成成功退出**：平台的 `start_agent` 只看退出码，
+        # 非零就 `run_tests: pending - Not reached`（实测 7d895aac11f4：35M token、2.3 小时，
+        # 白跑）。退出码 0 平台才会接着评测已经生成的工作区 —— 那正是主动收尾的全部意义。
+        print(f"\nSOFT STOP: {soft_stop}", flush=True)
+        print("Exiting 0 on purpose so the platform still evaluates the generated workspace.", flush=True)
+        return 0
     return 0 if result.get("ok") else 1
 
 

@@ -37,10 +37,14 @@ sys.path.insert(0, str(REPO))
 # app.config reads these at import time; they must be in place first.
 os.environ["LLM_API_KEY"] = "test-key"
 os.environ["LLM_BASE_URL"] = "http://127.0.0.1:1/v1"
-os.environ["LLM_CONTEXT_WINDOW"] = "2000"  # trigger = 2000 * 0.5 = 1000 estimated tokens
+os.environ["LLM_CONTEXT_WINDOW"] = "2000"
 os.environ["COMPACT_AT"] = "0.5"
 os.environ["COMPACT_KEEP_TOKENS"] = "50"
 os.environ["COMPACT_ENABLED"] = "1"
+# #62 起压缩触发点是**绝对量**优先（COMPACT_AT_TOKENS，默认 60000），窗口 × 比例只是回退。
+# 不显式给它一个小值，这条测试的整段会话（约 1.8K tokens）永远到不了 60K 的线，
+# 压缩一次都不会发生 —— 测试会静默空转（实测：summarizer calls=0，四个断言全红）。
+os.environ["COMPACT_AT_TOKENS"] = "800"
 
 from langchain_core.messages import AIMessage, HumanMessage  # noqa: E402
 from langchain_core.tools import tool  # noqa: E402
@@ -92,7 +96,9 @@ class _ScriptedModel:
 @tool
 def step(n: int) -> str:
     """Do one step of the task."""
-    return "x" * (300 if n == 1 else 4000)
+    # n=1 的返回要保持在中段最小 token 线（MIN_MIDDLE_TOKENS=512，≈1700 字符）之上，
+    # 否则压缩会在"中段太小不值得调摘要器"那一步被跳过，本测试就不再走真实压缩路径了。
+    return "x" * (2048 if n == 1 else 4000)
 
 
 def _ai_tool_call(call_id: str, n: int) -> AIMessage:
