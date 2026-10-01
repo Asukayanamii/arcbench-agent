@@ -735,6 +735,20 @@ SoftTimeLimitExceeded()` —— 平台有 celery 的 soft time limit。24h 那�
 → **退出 0**；只有"没跑完"（初始化失败、异常、队列未排空）才退 1。行为检查
 `check_a_failed_node_does_not_block_evaluation`（旧代码上红：没有 `compile_exit_code`）。
 
+**根因是"我们的包偏离了官方模板的退出码契约"**（遗留差异，不是这几天改出来的）：
+
+- 官方模板 `_template/arc_main.py` 的 `cmd_compile` 结尾是 **`return 0`**，注释原文：
+  "A completed compilation is a successful CLI operation even when one or more requirement
+  nodes/tests remain failed. … the process exit code is reserved for
+  invocation/configuration/runtime failures that prevent ARC from completing its workflow."
+- 我们的 `my_agent/arc_main.py` 是 `return 0 if result.get("ok") else 1`，而 `ok` 要求
+  **零失败节点**。这段逻辑随既有代码在 40cb03f（初始化比赛工作区）导入，之后没人动过
+  （`git log -S base_compilation_completed` 只指到初始化提交）
+- 反证：09-25 的 `5e447a97ffb7`（ticketbooking）日志里明明有
+  `Compilation finished with 6 failed node(s)`，平台照样评测了（30 个失败用例被记录）
+  —— 当时的包遵守契约；换成现在的包之后，"有失败节点"就变成退出 1、评测不跑
+- 本次修复等于**把模板契约恢复回来**；"软停止"和"跑完但有失败"这两种情况都归到退出 0
+
 其他观察（同一轮的日志）：
 
 - rss 峰值只有 **266MB**（09-28 那轮 1.31GB）—— 压缩/窗口管理变好

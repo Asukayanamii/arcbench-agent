@@ -22,6 +22,12 @@ agent 侧其实跑得很好：github 的日志末尾有完整 Compilation Summar
 评测跑了、评出 30 个失败；`7d895aac11f4` 非零退出 → `Not reached`）。于是 2 个失败节点
 把 63 个绿节点一起带进了 0 分。
 
+根因（遗留差异）：官方模板 `_template/arc_main.py` 的 `cmd_compile` 是 **`return 0`**，
+注释写明"编译完成就是成功的 CLI 操作，即使还有失败节点；退出码只留给阻止 ARC 完成流程的
+调用/配置/运行时错误"。我们的包写的是 `return 0 if result.get("ok") else 1`（`ok` 要求零失败
+节点），随既有代码导入后没人动过。反证：`5e447a97` 那次有 6 个失败节点却被评测 —— 当时的包
+遵守契约。
+
 ## 修法（本次提交）
 
 - `core/workflow._build_compile_result` 新增 `finished`：队列排空（所有任务到终态，可能
