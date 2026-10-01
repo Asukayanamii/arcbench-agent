@@ -752,6 +752,64 @@ def check_a_tiny_middle_is_not_summarised() -> None:
           (update.get("compaction") or {}).get("count") == 1, f"update={update!r}")
 
 
+def check_a_failed_node_does_not_block_evaluation() -> None:
+    """跑完但有个别节点失败，也要退出 0 —— 否则平台连评测都不跑（§4.22）。
+
+    实测 run `829d9669d118`（github，2026-09-30）：65 个节点 **63 个 test-passed**、
+    只失败 REQ-1-1-1 与 REQ-2-1-1，编译正常跑完（12.2 小时，日志里有完整的 Compilation
+    Summary），但 `ok=false` → `main.py` 退出 1 → 平台 `start_agent: failed` →
+    `run_tests: pending - Not reached` → **0/200、0 分**。sheet 同病（39/42 绿、3 失败）。
+    一个测试都没跑，绿的再多也白瞎。
+
+    验收就是"跑了就退 0"：
+    - `finished`（队列排空：任务都到终态，可能有失败节点）→ 0
+    - `soft_stop`（token 预算 / 墙钟主动收尾）→ 0
+    - 全绿（`ok`）→ 0
+    - 没跑完（初始化失败 / 异常 / 队列没排空）→ 1
+    """
+
+    print()
+    print("--- a failed node must not block evaluation ---")
+
+    import arc_main  # noqa: PLC0415
+
+    from core.workflow import ARCWorkflowManager, NODE_FAILED  # noqa: PLC0415
+
+    decide = getattr(arc_main, "compile_exit_code", None)
+    if not callable(decide):
+        check("the CLI has one exit-code decision", False,
+              "arc_main.compile_exit_code is missing - a failed node would still exit 1 "
+              "and the platform would skip the evaluation entirely")
+        return
+
+    check("all green -> 0", decide({"ok": True}) == 0)
+    check("finished with failed nodes -> still 0",
+          decide({"ok": False, "finished": True,
+                  "failed_nodes": ["REQ-1-1-1", "REQ-2-1-1"]}) == 0,
+          "63/65 green nodes would otherwise never be evaluated")
+    check("a soft stop -> 0",
+          decide({"ok": False, "soft_stop": "Run deadline reached: n/a"}) == 0)
+    check("an unfinished run -> 1",
+          decide({"ok": False, "finished": False}) == 1,
+          "a run that never drained must not pretend it produced a complete workspace")
+
+    queue_state = {
+        "node_states": {"REQ-2-1-1": NODE_FAILED},
+        "tasks": [
+            {"task_id": "t1", "node_id": "REQ-2-1-1", "phase": "IMPLEMENT", "status": "FAILED"},
+            {"task_id": "t2", "node_id": "REQ-2-2", "phase": "DESIGN", "status": "COMPLETED"},
+        ],
+        "operations": {},
+        "last_operation_id": "",
+    }
+    result = ARCWorkflowManager._build_compile_result(queue_state)
+    check("a drained queue reports finished", result.get("finished") is True)
+    check("...and is still not ok", result.get("ok") is False)
+    check("the CLI uses that decision",
+          "exit_code = compile_exit_code(result)" in
+          (REPO / "arc_main.py").read_text(encoding="utf-8", errors="replace"))
+
+
 def check_interface_contract_is_not_duplicated() -> None:
     """Ensure normal shared context does not repeat the full interface JSON."""
 
@@ -2061,6 +2119,7 @@ def main() -> int:
     check_the_run_stops_itself_before_the_platform_kills_it()
     check_the_run_finishes_before_the_platform_time_limit()
     check_a_tiny_middle_is_not_summarised()
+    check_a_failed_node_does_not_block_evaluation()
     check_stage_limits_are_published()
     check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()

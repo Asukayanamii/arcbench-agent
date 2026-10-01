@@ -718,6 +718,32 @@ SoftTimeLimitExceeded()` —— 平台有 celery 的 soft time limit。24h 那�
 同一处还发现 `_test_compaction_prefix.py` 自 #62 起**静默空转**（绝对触发点默认 60000，
 而它只设了"窗口 × 比例"，整段会话到不了线 → 压缩永不发生、四个断言全红），已修。
 
+**2026-09-30 追加取证：跑完 + 63/65 绿，但退出码 1 → 评测一次都没跑（✅ 已修）**
+
+| run | 任务 | 节点 | 时长 | tokens | 花费 | 平台结局 |
+| --- | --- | --- | ---: | ---: | ---: | --- |
+| `829d9669d118` | hackathon--github | **63/65 test-passed**（失败 REQ-1-1-1、REQ-2-1-1） | 12.2h | 48.0M | ¥56.90 | `start_agent: failed` → `run_tests: Not reached` |
+| `f84071f7b84d` | hackathon--sheet | **39/42 test-passed**（3 个失败） | 12.2h | 54.7M | ¥50.40 | 同上 |
+
+两题都是 **0/200、score 0** —— 一个测试都没跑。根因不在 agent：编译**正常跑完**
+（日志里有完整 Compilation Summary、`Compilation finished with 2 failed node(s)`），
+但 `ok=false`（有失败节点）→ CLI **退出 1** → 平台的评测只看退出码 → `run_tests: Not reached`。
+**96% 绿的节点被两个失败节点一起带进 0 分**，烧掉 ¥107.3。
+
+修法（本次提交）：`core.workflow._build_compile_result` 新增 `finished`（队列排空 =
+所有任务到终态），`arc_main.compile_exit_code()` 统一判定——`ok` / `soft_stop` / `finished`
+→ **退出 0**；只有"没跑完"（初始化失败、异常、队列未排空）才退 1。行为检查
+`check_a_failed_node_does_not_block_evaluation`（旧代码上红：没有 `compile_exit_code`）。
+
+其他观察（同一轮的日志）：
+
+- rss 峰值只有 **266MB**（09-28 那轮 1.31GB）—— 压缩/窗口管理变好
+- 15:55–18:27 卡在 `REQ-2-2-3` 的 TestGenerator（`摘要没带来净收益` 空转，约 2.5 小时
+  没有一次成功的模型调用）；18:27 起网关开始 429 `insufficient_quota`
+  （"Free quota exhausted … recharge compute credits"），最后几个节点是降级完成的
+- 每个节点往返数已大幅下降（github 全程 1,188 次调用 / 65 个节点），墙钟 12.2h < 23h —— 
+  **这轮如果不被退出码埋掉，本来是有分的**
+
 **每次改完**
 - [ ] `python tools/check_stage_bridge.py`（守住技能根与分页语义）
 - [ ] `python arc_main.py doctor`

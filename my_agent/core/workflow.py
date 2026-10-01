@@ -1240,6 +1240,8 @@ class ARCWorkflowManager:
         completed_tasks = [task["task_id"] for task in queue_state["tasks"] if task["status"] == TASK_COMPLETED]
         base_tasks = [task for task in queue_state["tasks"] if not task.get("operation_id")]
         base_compilation_completed = all(task["status"] == TASK_COMPLETED for task in base_tasks)
+        terminal_states = {TASK_COMPLETED, TASK_FAILED}
+        base_compilation_finished = all(task["status"] in terminal_states for task in base_tasks)
         last_operation_id = str(queue_state.get("last_operation_id") or "").strip()
         last_operation = queue_state.get("operations", {}).get(last_operation_id)
         last_operation_completed = not last_operation_id or (
@@ -1252,6 +1254,10 @@ class ARCWorkflowManager:
         )
         return {
             "ok": base_compilation_completed and last_operation_completed and not failed_nodes,
+            # 队列排空 = 这轮 agent 正常跑完了（任务都到终态，可能有失败节点）。CLI 靠它决定
+            # 退出码：平台只在退出码 0 时才评测，别让个别失败节点把已经做出来的部分一起埋掉
+            # （实测 829d9669d118：63/65 节点 test-passed，两个失败 → 退出 1 → 评测 0/200）。
+            "finished": base_compilation_finished,
             "failed_nodes": failed_nodes,
             "failed_operations": failed_operations,
             "visit_order": completed_tasks,
