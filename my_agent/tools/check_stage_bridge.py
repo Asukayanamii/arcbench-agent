@@ -566,6 +566,250 @@ def check_the_run_stops_itself_before_the_platform_kills_it() -> None:
           "so the default lets the run finish; set ARC_TOKEN_BUDGET to arm it")
 
 
+def check_the_run_finishes_before_the_platform_time_limit() -> None:
+    """平台有 24h 软时限，这是**实测**的：自己先收尾，别等被 `SoftTimeLimitExceeded()` 杀掉（§4.22）。
+
+    2026-09-28 那次运行整跑 **86,401s** 后被平台杀掉，`failure_reason =
+    SoftTimeLimitExceeded()`，`passed_count 0 / failed_count 0` —— **评测根本没开始**，
+    又是一次 0 分（两题都是；run-logs/2026-09-28-hackathon-softlimit-24h）。所以墙钟到线就要：
+    不再接新节点 + 把在跑的任务停掉 + 正常退出，把剩下的时间留给平台评测。
+    token 预算那套（§4.20）只挡"用量太大"，挡不住"时间用光"。
+
+    验的是这条链的每一环：账本有墙钟 → 判定会触发 → 在跑任务真的会被 `wait_for` 按剩余
+    时间掐掉 → compile 循环在挑下一个节点**之前**就问 → 默认值留给平台足够的评测余量。
+    """
+
+    print()
+    print("--- the run finishes before the platform time limit ---")
+
+    from app import config as app_config  # noqa: PLC0415
+    from core import budget  # noqa: PLC0415
+
+    deadline_exceeded = getattr(budget, "deadline_exceeded", None)
+    remaining_seconds = getattr(budget, "remaining_seconds", None)
+    if not callable(deadline_exceeded) or not callable(remaining_seconds):
+        check("the ledger knows the wall clock", False,
+              "core/budget.py has no deadline_exceeded/remaining_seconds")
+        return
+
+    saved_deadline = app_config.RUN_DEADLINE_SECONDS
+    budget.reset()
+    try:
+        app_config.RUN_DEADLINE_SECONDS = 0
+        check("with the wall clock off nothing trips and nothing is bounded",
+              not deadline_exceeded() and remaining_seconds() is None)
+
+        app_config.RUN_DEADLINE_SECONDS = 1
+        check("a fresh clock is inside the deadline", not deadline_exceeded())
+        remaining = remaining_seconds()
+        check("the remaining time is reported", isinstance(remaining, float) and 0.0 < remaining <= 1.0,
+              f"got {remaining!r}")
+        time.sleep(1.05)
+        check("the deadline trips once the clock passes it", deadline_exceeded())
+        check("the remaining time never goes negative", remaining_seconds() == 0.0,
+              f"got {remaining_seconds()!r}")
+
+        async def slow_task() -> str:
+            await asyncio.sleep(5.0)
+            return "the task ran to completion despite the deadline"
+
+        async def probe() -> float:
+            started = time.monotonic()
+            try:
+                await asyncio.wait_for(slow_task(), timeout=remaining_seconds())
+            except (asyncio.TimeoutError, TimeoutError):
+                return time.monotonic() - started
+            return -1.0
+
+        elapsed = asyncio.run(probe())
+        check("a task that overruns the remaining time is abandoned immediately",
+              0.0 <= elapsed < 1.0, f"elapsed={elapsed:.2f}s - wait_for did not cut it")
+
+        message = budget.deadline_stop_message()
+        check("the stop message carries the numbers, the env var and the platform limit",
+              all(part in message for part in ("86", "86400", "ARC_RUN_DEADLINE_SECONDS")),
+              message[:140])
+    finally:
+        app_config.RUN_DEADLINE_SECONDS = saved_deadline
+        budget.reset()
+
+    check("the wall clock is armed by default",
+          app_config.RUN_DEADLINE_SECONDS > 0,
+          f"got {app_config.RUN_DEADLINE_SECONDS!r} - the platform kills at 86400s, "
+          "so an unarmed clock is a guaranteed 0 on the long tasks")
+    check("it leaves the platform a margin before 86400s",
+          app_config.RUN_DEADLINE_SECONDS <= 86_400 - 1_800,
+          f"got {app_config.RUN_DEADLINE_SECONDS!r} - the process has to exit and the "
+          "platform still has to run the evaluation")
+
+    source = (REPO / "core" / "workflow.py").read_text(encoding="utf-8", errors="replace")
+    guard = "if budget.exceeded() or budget.deadline_exceeded():"
+    take = "task = self._next_runnable_task(queue_state)"
+    check("the compile loop consults the wall clock", guard in source)
+    if guard in source and take in source:
+        check("...before it picks the next node, so no new work starts",
+              source.index(guard) < source.index(take),
+              "checking after picking a task would start one more node anyway")
+    check("the in-flight task is bounded by the remaining time",
+          "asyncio.wait_for(self._run_task(task), timeout=remaining)" in source
+          and "remaining = budget.remaining_seconds()" in source,
+          "a node can run for 7+ hours, so 'wait for it to finish' misses the platform wall")
+    guard_line = "if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) and budget.deadline_exceeded():"
+    check("a timeout only ends the run when the wall clock is the actual reason",
+          guard_line in source,
+          "an unrelated TimeoutError (e.g. a per-call deadline) must stay an ordinary failure")
+    check("...and the abandoned task is reported with the deadline message",
+          "budget.deadline_stop_message()" in source,
+          "the log has to say why the run ended early")
+
+    print()
+    print("--- a soft stop has to exit 0, or the platform never evaluates ---")
+
+    from core.workflow import ARCWorkflowManager  # noqa: PLC0415
+
+    empty_queue = {"node_states": {}, "tasks": [], "operations": {}, "last_operation_id": ""}
+    plain = ARCWorkflowManager._build_compile_result(empty_queue)
+    check("a normal result carries no soft stop", plain.get("soft_stop") == "",
+          f"got {plain.get('soft_stop')!r}")
+    marked = ARCWorkflowManager._build_compile_result(empty_queue, soft_stop="Run deadline reached: n/a")
+    check("the soft stop travels into the compile result",
+          marked.get("soft_stop") == "Run deadline reached: n/a",
+          f"got {marked.get('soft_stop')!r}")
+    check("workflow marks both stop reasons as a soft stop",
+          "soft_stop = budget.stop_message()" in source
+          and "soft_stop = budget.deadline_stop_message()" in source)
+    check("the soft stop reaches the result", "soft_stop=soft_stop" in source)
+
+    entry = (REPO / "arc_main.py").read_text(encoding="utf-8", errors="replace")
+    check("the CLI exits 0 on a soft stop",
+          "Exiting 0 on purpose so the platform still evaluates" in entry,
+          "a non-zero exit makes start_agent fail and run_tests 'Not reached' "
+          "(measured: run 7d895aac11f4 burned 35M tokens and was never evaluated)")
+    check("a soft stop is not reported as a failure",
+          'if not result.get("ok") and not soft_stop:' in entry,
+          "the failure report must not claim the run failed when it stopped on purpose")
+
+
+def check_a_tiny_middle_is_not_summarised() -> None:
+    """中段小到不可能有净收益时，别调摘要器（§4.22）。
+
+    平台 24h 那轮的日志里，一批 78–345 tokens 的中段反复被判"摘要没带来净收益，不写入"——
+    每次都是**一次完整的摘要调用**（还有失败/重试的噪声）。摘要块光固定分隔标记就有几十
+    token，要跑赢这种中段，只能指望摘要器写得比原文还短，它做不到。中段会长大，到线了再压。
+    """
+
+    print()
+    print("--- a tiny middle is not worth a summariser call ---")
+
+    from langchain_core.messages import AIMessage, HumanMessage  # noqa: PLC0415
+
+    from app.agent.compaction import runtime as compaction_runtime  # noqa: PLC0415
+
+    class _CountingSummariser:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.calls = 0
+
+        async def ainvoke(self, messages, config=None, **kwargs):  # noqa: ANN001
+            self.calls += 1
+            return AIMessage(content=self.text)
+
+    async def run(middle_chars: int) -> tuple[int, dict]:
+        saved = (
+            compaction_runtime.COMPACT_AT_TOKENS,
+            compaction_runtime.COMPACT_KEEP_TOKENS,
+            compaction_runtime.COMPACT_ENABLED,
+        )
+        compaction_runtime.COMPACT_AT_TOKENS = 100
+        compaction_runtime.COMPACT_KEEP_TOKENS = 1000
+        compaction_runtime.COMPACT_ENABLED = True
+        try:
+            messages = [
+                HumanMessage(content="head"),
+                AIMessage(content="m" * middle_chars),
+                AIMessage(content="n" * middle_chars),  # 中段至少两条消息（MIN_MIDDLE=2）
+                HumanMessage(content="t" * 4000),  # 保留段本身要超过 keep 预算
+            ]
+            model = _CountingSummariser("短摘要")
+            update = await compaction_runtime.compact_once(
+                {"messages": messages},
+                summary_model=model,
+                thread_id=f"middle-{middle_chars}",
+            )
+            return model.calls, update
+        finally:
+            (compaction_runtime.COMPACT_AT_TOKENS,
+             compaction_runtime.COMPACT_KEEP_TOKENS,
+             compaction_runtime.COMPACT_ENABLED) = saved
+
+    calls, update = asyncio.run(run(200))  # 中段 ≈ 60 tokens
+    check("a tiny middle costs no summariser call", calls == 0, f"calls={calls}")
+    check("...and writes nothing", not update, f"update={update!r}")
+
+    calls, update = asyncio.run(run(4000))  # 中段 ≈ 1.2K tokens
+    check("a real middle still compacts (exactly one summariser call)", calls == 1, f"calls={calls}")
+    check("...and the compaction is written",
+          (update.get("compaction") or {}).get("count") == 1, f"update={update!r}")
+
+
+def check_a_failed_node_does_not_block_evaluation() -> None:
+    """跑完但有个别节点失败，也要退出 0 —— 否则平台连评测都不跑（§4.22）。
+
+    实测 run `829d9669d118`（github，2026-09-30）：65 个节点 **63 个 test-passed**、
+    只失败 REQ-1-1-1 与 REQ-2-1-1，编译正常跑完（12.2 小时，日志里有完整的 Compilation
+    Summary），但 `ok=false` → `main.py` 退出 1 → 平台 `start_agent: failed` →
+    `run_tests: pending - Not reached` → **0/200、0 分**。sheet 同病（39/42 绿、3 失败）。
+    一个测试都没跑，绿的再多也白瞎。
+
+    验收就是"跑了就退 0"：
+    - `finished`（队列排空：任务都到终态，可能有失败节点）→ 0
+    - `soft_stop`（token 预算 / 墙钟主动收尾）→ 0
+    - 全绿（`ok`）→ 0
+    - 没跑完（初始化失败 / 异常 / 队列没排空）→ 1
+    """
+
+    print()
+    print("--- a failed node must not block evaluation ---")
+
+    import arc_main  # noqa: PLC0415
+
+    from core.workflow import ARCWorkflowManager, NODE_FAILED  # noqa: PLC0415
+
+    decide = getattr(arc_main, "compile_exit_code", None)
+    if not callable(decide):
+        check("the CLI has one exit-code decision", False,
+              "arc_main.compile_exit_code is missing - a failed node would still exit 1 "
+              "and the platform would skip the evaluation entirely")
+        return
+
+    check("all green -> 0", decide({"ok": True}) == 0)
+    check("finished with failed nodes -> still 0",
+          decide({"ok": False, "finished": True,
+                  "failed_nodes": ["REQ-1-1-1", "REQ-2-1-1"]}) == 0,
+          "63/65 green nodes would otherwise never be evaluated")
+    check("a soft stop -> 0",
+          decide({"ok": False, "soft_stop": "Run deadline reached: n/a"}) == 0)
+    check("an unfinished run -> 1",
+          decide({"ok": False, "finished": False}) == 1,
+          "a run that never drained must not pretend it produced a complete workspace")
+
+    queue_state = {
+        "node_states": {"REQ-2-1-1": NODE_FAILED},
+        "tasks": [
+            {"task_id": "t1", "node_id": "REQ-2-1-1", "phase": "IMPLEMENT", "status": "FAILED"},
+            {"task_id": "t2", "node_id": "REQ-2-2", "phase": "DESIGN", "status": "COMPLETED"},
+        ],
+        "operations": {},
+        "last_operation_id": "",
+    }
+    result = ARCWorkflowManager._build_compile_result(queue_state)
+    check("a drained queue reports finished", result.get("finished") is True)
+    check("...and is still not ok", result.get("ok") is False)
+    check("the CLI uses that decision",
+          "exit_code = compile_exit_code(result)" in
+          (REPO / "arc_main.py").read_text(encoding="utf-8", errors="replace"))
+
+
 def check_interface_contract_is_not_duplicated() -> None:
     """Ensure normal shared context does not repeat the full interface JSON."""
 
@@ -1873,6 +2117,9 @@ def main() -> int:
     check_the_read_cache_records_the_window_the_tool_serves()
     check_a_model_call_cannot_hang_forever()
     check_the_run_stops_itself_before_the_platform_kills_it()
+    check_the_run_finishes_before_the_platform_time_limit()
+    check_a_tiny_middle_is_not_summarised()
+    check_a_failed_node_does_not_block_evaluation()
     check_stage_limits_are_published()
     check_interface_contract_is_not_duplicated()
     check_guard_unlocks_after_a_failing_validation()

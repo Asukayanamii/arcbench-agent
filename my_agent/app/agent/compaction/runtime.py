@@ -12,6 +12,7 @@ from time import monotonic
 from langchain_core.language_models import BaseChatModel
 
 from app.agent.compaction.policy import (
+    MIN_MIDDLE_TOKENS,
     TAG,
     estimate,
     estimate_view,
@@ -106,6 +107,15 @@ async def compact_once(
         logger.debug("没有值得摘要的中段 thread=%s 共%d条", thread_id, len(messages))
         return {}
 
+    # 中段太小就别调摘要器：摘要块（含分隔标记）光固定部分就有几十 token，还要写得出比中段
+    # 更短的摘要才有净收益。实测一批 78–345 tokens 的中段反复被判"没带来净收益"，每次白花
+    # 一个摘要调用（run-logs/2026-09-28-hackathon-softlimit-24h，§4.22）。中段会长大，到线了
+    # 自然会压；手动压缩（force）不受这条限制。
+    replaced = sum(message_tokens(item) for item in messages[floor:cut])
+    if not force and replaced < MIN_MIDDLE_TOKENS:
+        logger.debug("中段只有 %d tokens，不值得为它调一次摘要 thread=%s", replaced, thread_id)
+        return {}
+
     previous = (state.get("compaction") or {}).get("summary", "")
     body = trim_middle(
         serialize(messages[floor:cut]), summary_input_chars(LLM_CONTEXT_WINDOW)
@@ -129,7 +139,6 @@ async def compact_once(
     summary = text_of(response).strip()
     # 净收益校验用同口径比较：被替换掉的中段 vs 顶替它的摘要块。拿"provider 实报的前值"
     # 去比"粗估的后值"会因两边误差方向不同而误判（实测：CJK 内容下会把划算的压缩判成不划算）。
-    replaced = sum(message_tokens(item) for item in messages[floor:cut])
     if not summary or summary_block_tokens(summary) >= replaced:
         note_failure(thread_id)
         logger.warning(

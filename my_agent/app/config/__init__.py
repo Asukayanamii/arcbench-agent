@@ -124,6 +124,21 @@ TOKEN_BUDGET: int = (
     else _int_or(_RAW_TOKEN_BUDGET, 0)
 )
 
+# ---- 本轮编译的墙钟上限（默认 23h，对着平台实测的 24h 软时限）----
+# 这不是我们猜的上限，是**平台自己给的数**：2026-09-28 那次运行从 13:21:52 跑到
+# 2026-09-29 13:21:52 整（86,401s），failure_reason 是 `SoftTimeLimitExceeded()`
+# —— Celery 的 soft time limit = 1,440 分钟。被杀时 `passed_count 0 / failed_count 0`，
+# **评测根本没开始**（run-logs/2026-09-28-hackathon-softlimit-24h/，§4.22）。
+# 所以到线就自己收尾：不再接新节点，**在跑的那个任务也一起停**（节点实测最长 7.6 小时，
+# "等它做完"赶不上墙），然后正常退出，让平台还有时间评测已经生成的部分。
+# 留 1 小时余量：进程收尾、平台评测都要时间。想关掉：`ARC_RUN_DEADLINE_SECONDS=0`。
+_RAW_RUN_DEADLINE = os.getenv("ARC_RUN_DEADLINE_SECONDS", "").strip().lower()
+RUN_DEADLINE_SECONDS: int = (
+    0
+    if _RAW_RUN_DEADLINE in {"0", "off", "none", "disable", "disabled"}
+    else _int_or(_RAW_RUN_DEADLINE, 82_800)
+)
+
 
 # ---- 上下文自动压缩 ----
 # 窗口这个数只能由配置给：provider 一般不报（DeepSeek 的 /v1/models 只有 id/owned_by），

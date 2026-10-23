@@ -1,0 +1,50 @@
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] tool-result> read_file result=backend/tests/req-2-2-3-people-api.test.js（共 302 行，显示 201-300）
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const newOwnerCookie = await signInCookie(NON_MEMBER_USERNAME);
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const allowed = await request(app)
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       .post(`/api/organizations/${ORG_SLUG}/people`)
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       .set('Cookie', newOwnerCookie)
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       .send({ username: UNKNOWN_USERNAME, role: 'member' });
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     // The second Owner reaches the membership validation path (400) instead of
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     // the owner-only 403, proving the admin permission was granted.
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     expect(allowed.status).toBe(400);
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]   });
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] 
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]   it('rejects an existing member with Account is already a member and never creates a duplicate row', async () => {
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const cookie = await signInCookie();
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const { get } = harness.facade;
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const org = await get('SELECT id FROM organizations WHERE slug = ?', [ORG_SLUG]);
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] 
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const duplicate = await request(app)
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       .post(`/api/organizations/${ORG_SLUG}/people`)
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       .set('Cookie', cookie)
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       .send({ username: OWNER_USERNAME, role: 'member' });
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] 
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     expect(duplicate.status).toBe(400);
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     expect(duplicate.body).toEqual({
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       error: 'Account is already a member',
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       field: 'username',
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     });
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] 
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const roles = await get(
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       'SELECT COUNT(*) AS count FROM organization_roles WHERE org_id = ? AND account_id = (SELECT id FROM accounts WHERE username = ?)',
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       [org.id, OWNER_USERNAME],
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     );
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     expect(roles.count).toBe(1);
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] 
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const memberships = await get(
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       'SELECT COUNT(*) AS count FROM organization_members WHERE org_id = ? AND account_id = (SELECT id FROM accounts WHERE username = ?)',
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       [org.id, OWNER_USERNAME],
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     );
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     expect(memberships.count).toBe(1);
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]   });
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] 
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]   it('rejects the unknown username unknown-reviewer with Account not found and writes nothing', async () => {
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const cookie = await signInCookie();
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const { get } = harness.facade;
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const org = await get('SELECT id FROM organizations WHERE slug = ?', [ORG_SLUG]);
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] 
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]     const res = await request(app)
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3]       .post(`/api/organizations/${ORG_SLUG
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.468+00:00] [TestDrivenDeveloper][REQ-2-2-3] ...[truncated]
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.469+00:00] [TestDrivenDeveloper][REQ-2-2-3] tool-result> read_file result="content=\\"backend/tests/req-2-2-3-people-api.test.js（共 302 行，显示 201-300）\\\
+[2026-09-29 13:21:44] [generation-agent.stdout] [2026-09-29T13:21:44.469+00:00] [TestDrivenDeveloper][REQ-2-2-3] ...[truncated]

@@ -243,6 +243,22 @@ def _resolve_workspace_settings(
     return app_type, web_port
 
 
+def compile_exit_code(result: dict) -> int:
+    """编译结果 → 进程退出码。
+
+    平台的 `start_agent` 只看这个退出码：非零 → `run_tests: pending - Not reached`，
+    一个测试都不会跑（实测 `7d895aac11f4` 35.5M token、`829d9669d118`/`f84071f7b84d`）。
+    所以判定要宽：只要 agent 是**正常跑完**（`finished`：队列排空、任务都到终态）或有软停止
+    标记（token 预算 / 墙钟），即使有失败节点也退 0 —— 已经生成的工作区该被评测，
+    失败节点只是没做出来。实测 09-30 那轮：github 63/65、sheet 39/42 个节点 test-passed、
+    只有 2/3 个失败，退出 1 → 评测 0/200、0 分（run-logs/2026-09-30-…）。
+    """
+
+    if result.get("ok") or result.get("soft_stop") or result.get("finished"):
+        return 0
+    return 1
+
+
 async def cmd_compile(args: argparse.Namespace) -> int:
     """Execute compile subcommand."""
     _ensure_dotenv_loaded()
@@ -382,7 +398,8 @@ async def cmd_compile(args: argparse.Namespace) -> int:
         stop_cli_spinner()
     
     elapsed = time.time() - start_time
-    if not result.get("ok"):
+    soft_stop = str(result.get("soft_stop") or "")
+    if not result.get("ok") and not soft_stop:
         report_paths = write_failure_report(
             output_dir=config.output_dir,
             requirement_path=config.requirement_path,
@@ -391,7 +408,21 @@ async def cmd_compile(args: argparse.Namespace) -> int:
         )
         result["failure_report_paths"] = report_paths
     print_compilation_summary(result, config.output_dir, elapsed)
-    return 0 if result.get("ok") else 1
+    exit_code = compile_exit_code(result)
+    if soft_stop:
+        # 主动收尾（token 预算 / 墙钟）要**当成成功退出**：平台的 `start_agent` 只看退出码，
+        # 非零就 `run_tests: pending - Not reached`（实测 7d895aac11f4：35M token、2.3 小时，
+        # 白跑）。退出码 0 平台才会接着评测已经生成的工作区 —— 那正是主动收尾的全部意义。
+        print(f"\nSOFT STOP: {soft_stop}", flush=True)
+        print("Exiting 0 on purpose so the platform still evaluates the generated workspace.", flush=True)
+    elif exit_code == 0 and not result.get("ok"):
+        # 跑完了但有个别节点失败：同样退 0（不然 63/65 的绿节点一起白瞎，见 compile_exit_code）。
+        print(
+            "\nExiting 0 on purpose: the agent finished (some nodes failed) so the platform "
+            "still evaluates the generated workspace. Details are in the failure report.",
+            flush=True,
+        )
+    return exit_code
 
 
 # ============================================================

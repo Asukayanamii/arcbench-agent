@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import hashlib
@@ -445,13 +446,15 @@ class ARCWorkflowManager:
             f"Loaded processing queue with {len(queue_state['tasks'])} task(s) for root node {root_id}.",
         )
 
+        soft_stop = ""
         while True:
-            # token 预算软停止：到线就**不再接新节点**，把当前节点收尾、正常走出这个循环，
+            # 软停止：token 预算或墙钟上限到线就**不再接新节点**，正常走出这个循环，
             # 让平台还能评已经生成的部分。被 SIGKILL 是 0 分（`passed_count 0`），
-            # 主动收尾至少留下已完成节点的分（SCORING_AND_OPTIMIZATION.md §4.20）。
-            # 用量由 `runners._usage_line` 在每次模型调用结束时记账。
-            if budget.exceeded():
-                await self._log("Compiler", budget.stop_message(), "error")
+            # 主动收尾至少留下已完成节点的分（SCORING_AND_OPTIMIZATION.md §4.20/§4.22）。
+            # 用量由 `runners._usage_line` 在每次模型调用结束时记账；墙钟从本进程启动起算。
+            if budget.exceeded() or budget.deadline_exceeded():
+                soft_stop = budget.stop_message()
+                await self._log("Compiler", soft_stop, "error")
                 break
 
             task = self._next_runnable_task(queue_state)
@@ -473,8 +476,19 @@ class ARCWorkflowManager:
 
             await self._log("Compiler", f"Running {phase} for node {node_id}...", node_id=node_id)
             try:
-                task_ok = await self._run_task(task)
+                # 墙钟上限收尾用：到点要把**在跑的这个任务**也停掉 —— 单个节点实测最长
+                # 7.6 小时（run-logs/2026-09-28-hackathon-softlimit-24h），"等它做完"
+                # 会直接撞平台的 24h 软时限。只给它剩余时间，超时在下面按墙钟收尾处理。
+                remaining = budget.remaining_seconds()
+                if remaining is None:
+                    task_ok = await self._run_task(task)
+                else:
+                    task_ok = await asyncio.wait_for(self._run_task(task), timeout=remaining)
             except Exception as exc:
+                if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) and budget.deadline_exceeded():
+                    soft_stop = budget.deadline_stop_message()
+                    await self._log("Compiler", soft_stop, "error", node_id=node_id)
+                    break
                 # 阶段里抛出的异常（模型调用失败、工具层报错……）以前会直接冲出这个循环，
                 # 把整轮编译带停：这个节点没做完，排在后面的节点也一起不做了。
                 # 降级成"这个任务失败"、走下面既有的失败分支——节点标记失败、记账、继续下一个。
@@ -557,7 +571,7 @@ class ARCWorkflowManager:
             await self._commit_phase_checkpoint(node_id, f"{phase}-FAILED", requirement_data)
             await self._log("Compiler", f"{phase} failed for node {node_id}.", "error", node_id)
 
-        return self._build_compile_result(queue_state, failure_details=failure_details)
+        return self._build_compile_result(queue_state, failure_details=failure_details, soft_stop=soft_stop)
 
     def _append_selected_tdd_task(
         self,
@@ -1218,6 +1232,7 @@ class ARCWorkflowManager:
         queue_state: dict[str, Any],
         *,
         failure_details: list[dict[str, Any]] | None = None,
+        soft_stop: str = "",
     ) -> dict[str, Any]:
         failed_nodes = sorted(
             node_id for node_id, state in queue_state["node_states"].items() if state == NODE_FAILED
@@ -1225,6 +1240,8 @@ class ARCWorkflowManager:
         completed_tasks = [task["task_id"] for task in queue_state["tasks"] if task["status"] == TASK_COMPLETED]
         base_tasks = [task for task in queue_state["tasks"] if not task.get("operation_id")]
         base_compilation_completed = all(task["status"] == TASK_COMPLETED for task in base_tasks)
+        terminal_states = {TASK_COMPLETED, TASK_FAILED}
+        base_compilation_finished = all(task["status"] in terminal_states for task in base_tasks)
         last_operation_id = str(queue_state.get("last_operation_id") or "").strip()
         last_operation = queue_state.get("operations", {}).get(last_operation_id)
         last_operation_completed = not last_operation_id or (
@@ -1237,11 +1254,19 @@ class ARCWorkflowManager:
         )
         return {
             "ok": base_compilation_completed and last_operation_completed and not failed_nodes,
+            # 队列排空 = 这轮 agent 正常跑完了（任务都到终态，可能有失败节点）。CLI 靠它决定
+            # 退出码：平台只在退出码 0 时才评测，别让个别失败节点把已经做出来的部分一起埋掉
+            # （实测 829d9669d118：63/65 节点 test-passed，两个失败 → 退出 1 → 评测 0/200）。
+            "finished": base_compilation_finished,
             "failed_nodes": failed_nodes,
             "failed_operations": failed_operations,
             "visit_order": completed_tasks,
             "states": dict(queue_state["node_states"]),
             "failure_details": failure_details or [],
+            # 软停止（token 预算 / 墙钟）的说明。非空 = 这轮是**主动收尾**，不是失败：
+            # CLI 看到它要当成成功退出（退出码 0），否则平台 `start_agent` 判失败、
+            # `run_tests` 直接 Not reached，等于白跑（实测 7d895aac11f4）。
+            "soft_stop": soft_stop,
         }
 
     def _save_processing_queue(self, queue_state: dict[str, Any]) -> None:
